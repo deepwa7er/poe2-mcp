@@ -243,3 +243,58 @@ def fetch_pob_export(account: str, name: str, league: str | None = None) -> str:
     if not code:
         raise ValueError(f"no PoB export found for {name} ({account}) on poe.ninja")
     return code
+
+
+# ---------------------------------------------------------------------------
+# A specific account's own characters (profile)
+# ---------------------------------------------------------------------------
+
+def _account_slug(account: str) -> str:
+    """poe.ninja uses a lowercase, hyphenated slug: 'Name#1234' -> 'name-1234'."""
+    return account.strip().lstrip("/").replace("#", "-").lower()
+
+
+def list_characters(account: str) -> list[dict]:
+    """List all of an account's characters across leagues (public profiles only)."""
+    data = _get_json(f"/poe2/api/profile/characters/{_account_slug(account)}/0")
+    if not isinstance(data, list):
+        return []
+    out: list[dict] = []
+    for c in data:
+        out.append({
+            "name": c.get("name"),
+            "class": c.get("className"),
+            "level": c.get("level"),
+            "league": c.get("league"),
+            "league_url": c.get("leagueUrl"),
+            "current": c.get("isCurrent", False),
+            "updated": c.get("updated"),
+            "skills": [s.get("name") for s in c.get("skills", []) if isinstance(s, dict) and s.get("name")],
+        })
+    return out
+
+
+def fetch_character_export(account: str, name: str) -> str:
+    """
+    Return a PoB export code for one of an account's own characters.
+
+    Looks the character up in the account's profile, resolves its league's build
+    snapshot, and pulls the export. Raises a clear error if poe.ninja has not
+    indexed that character (i.e. it is not on the current ladder).
+    """
+    slug = _account_slug(account)
+    chars = _get_json(f"/poe2/api/profile/characters/{slug}/0")
+    match = next((c for c in chars if c.get("name") == name), None) if isinstance(chars, list) else None
+    if match is None:
+        raise ValueError(f"no character named {name!r} found on account {account!r} (is the profile public?)")
+
+    league = match.get("league") or match.get("leagueUrl")
+    try:
+        return fetch_pob_export(slug, name, league=league)
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code == 404:
+            raise ValueError(
+                f"poe.ninja has no build snapshot for {name!r} (league {league!r}) — it is likely "
+                "not on the current ladder. Export it from Path of Building to analyse this one."
+            ) from e
+        raise

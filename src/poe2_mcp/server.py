@@ -17,7 +17,11 @@ Tools:
   get_meta_overview — poe.ninja ascendancy popularity for a league
   list_top_builds — top community builds on the poe.ninja ladder
   load_community_build — load a poe.ninja build by account + character name
+  list_my_characters — your own characters from poe.ninja (any league)
+  load_my_character — load one of your own characters by name
 """
+
+import os
 
 from mcp.server.fastmcp import FastMCP
 
@@ -478,9 +482,50 @@ def load_community_build(account: str, name: str, league: str | None = None) -> 
     return _loaded_build_summary(source=f"poe.ninja — {name} ({account})")
 
 
+@mcp.tool()
+def list_my_characters(account: str | None = None) -> list[dict]:
+    """
+    List your own characters from poe.ninja (across all leagues).
+
+    Each entry has name, class/ascendancy, level, league, whether it is your current
+    character, when it was last updated, and its main skills. Use a name with
+    load_my_character to pull that build in for analysis.
+
+    Pass account as "Name#1234", or set the POE2_ACCOUNT environment variable to default
+    it. Your PoE profile must be public for poe.ninja to see your characters.
+    """
+    return poeninja.list_characters(_resolve_account(account))
+
+
+@mcp.tool()
+def load_my_character(name: str, account: str | None = None) -> str:
+    """
+    Load one of your own characters from poe.ninja by name, ready for analysis.
+
+    No Path of Building export/paste needed — this pulls the build straight from
+    poe.ninja and loads it as the active build, so every analysis tool then works on it.
+
+    Pass account as "Name#1234" or set POE2_ACCOUNT. Note: poe.ninja can only provide a
+    build for characters it has indexed on the current ladder; for others (Standard, SSF,
+    fresh alts) it will say so and you'll need to export from PoB for that one.
+    """
+    code = poeninja.fetch_character_export(_resolve_account(account), name)
+    _load_build_from_xml(decode_build_code(code))
+    return _loaded_build_summary(source=f"poe.ninja — {name}")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _resolve_account(account: str | None) -> str:
+    acct = account or os.environ.get("POE2_ACCOUNT")
+    if not acct:
+        raise ValueError(
+            "No PoE account configured. Pass account=\"Name#1234\", or set the "
+            "POE2_ACCOUNT environment variable."
+        )
+    return acct
 
 def _node_type(node: PassiveNode | TreeNode) -> str:
     if node.is_keystone:

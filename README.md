@@ -59,6 +59,8 @@ claude mcp add poe2 -- uv --directory /path/to/poe2-mcp run poe2-mcp
 | `get_meta_overview` | Current build meta (ascendancy popularity) for a league, from poe.ninja |
 | `list_top_builds` | Top community builds on the poe.ninja ladder |
 | `load_community_build` | Load a poe.ninja ladder build by account + character name |
+| `list_my_characters` | Your own characters from poe.ninja (any league) |
+| `load_my_character` | Load one of your own characters by name — no PoB export needed |
 
 ### Class region filtering
 
@@ -89,8 +91,36 @@ load_community_build(account="…", name="…")      → pull one in; then analy
 Once a community build is loaded, every analysis tool (`get_stats`, `get_passives`,
 `analyze_defenses`, `path_to_node`, …) works on it.
 
-This uses poe.ninja's public but **undocumented** API, so it may change without notice.
-Responses are cached briefly to stay fast and to be a polite client.
+### Your own characters
+
+Skip the Path of Building export/paste entirely for your own builds:
+
+```
+list_my_characters()              → all your characters (name, class, level, league)
+load_my_character("MyChar")       → load one straight in for analysis
+```
+
+Set the `POE2_ACCOUNT` environment variable to your account (`Name#1234`) so you don't
+pass it every time, e.g. in the MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "poe2": {
+      "command": "uv",
+      "args": ["--directory", "/path/to/poe2-mcp", "run", "poe2-mcp"],
+      "env": { "POE2_ACCOUNT": "YourName#1234" }
+    }
+  }
+}
+```
+
+Your PoE profile must be public. poe.ninja can only load characters it has indexed on
+the current ladder; for Standard/SSF/fresh alts it lists them but asks you to export from
+PoB for that one.
+
+These tools use poe.ninja's public but **undocumented** API, so it may change without
+notice. Responses are cached briefly to stay fast and to be a polite client.
 
 ## Tree data
 

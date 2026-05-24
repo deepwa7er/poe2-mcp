@@ -13,6 +13,8 @@ def _fixture_json(path: str, params=None) -> dict:
         return json.loads((FIXTURES / "poeninja_build_index_state.json").read_text())
     if "index-state" in path:
         return json.loads((FIXTURES / "poeninja_index_state.json").read_text())
+    if "/profile/characters/" in path:
+        return json.loads((FIXTURES / "poeninja_profile_characters.json").read_text())
     if "/character" in path:
         return json.loads((FIXTURES / "poeninja_character.json").read_text())
     raise AssertionError(f"unexpected json path {path}")
@@ -80,3 +82,45 @@ def test_fetch_pob_export_returns_decodable_code():
     assert build.class_name == "Warrior"
     assert build.ascendancy == "Titan"
     assert build.level == 100
+
+
+def test_account_slug():
+    assert poeninja._account_slug("Methanman#2640") == "methanman-2640"
+    assert poeninja._account_slug("  methanman-2640 ") == "methanman-2640"
+
+
+def test_list_characters():
+    chars = poeninja.list_characters("methanman#2640")
+    assert len(chars) == 3
+    first = chars[0]
+    assert first["name"] == "drubringer"
+    assert first["class"] == "Titan"
+    assert first["league"] == "Fate of the Vaal"
+    assert first["current"] is True
+    assert "Furious Slam" in first["skills"]
+    # a non-current character is also listed
+    assert any(c["league"] == "Standard" and not c["current"] for c in chars)
+
+
+def test_fetch_character_export_indexed():
+    code = poeninja.fetch_character_export("methanman#2640", "drubringer")
+    assert len(code) > 1000
+
+
+def test_fetch_character_export_unknown_name():
+    with pytest.raises(ValueError, match="no character named"):
+        poeninja.fetch_character_export("methanman#2640", "ghost")
+
+
+def test_fetch_character_export_not_indexed(monkeypatch):
+    # A character on the profile that poe.ninja has no build snapshot for -> friendly error.
+    import httpx
+
+    def _raise_404(account, name, league=None):
+        req = httpx.Request("GET", "https://poe.ninja/x")
+        resp = httpx.Response(404, request=req)
+        raise httpx.HTTPStatusError("not found", request=req, response=resp)
+
+    monkeypatch.setattr(poeninja, "fetch_pob_export", _raise_404)
+    with pytest.raises(ValueError, match="not on the current ladder"):
+        poeninja.fetch_character_export("methanman#2640", "pingkong")
