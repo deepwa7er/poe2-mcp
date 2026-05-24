@@ -44,6 +44,7 @@ def parse_build_xml(xml: str) -> Build:
         socket_groups=_parse_skills(root),
         stats=_parse_stats(root),
         notes=_parse_notes(root),
+        config=_parse_config(root),
     )
 
 
@@ -236,3 +237,53 @@ def _parse_notes(root: ET.Element) -> str:
     if notes_elem is None:
         return ""
     return (notes_elem.text or "").strip()
+
+
+def _parse_config(root: ET.Element) -> dict:
+    """Parse the PoB <Config> assumptions behind the computed stats.
+
+    <Input> entries are the active config (conditions, multipliers, quest
+    passives); <Placeholder> entries are default enemy/multiplier values. PoB2
+    nests these under <ConfigSet> (honour activeConfigSet); older exports list
+    them directly under <Config>.
+    """
+    cfg = root.find("Config")
+    if cfg is None:
+        return {}
+
+    sets = cfg.findall("ConfigSet")
+    if sets:
+        active_id = cfg.get("activeConfigSet", "1")
+        container = next((s for s in sets if s.get("id") == active_id), sets[0])
+    else:
+        container = cfg
+
+    inputs: dict = {}
+    for elem in container.findall("Input"):
+        name = elem.get("name")
+        if name:
+            inputs[name] = _config_value(elem)
+
+    placeholders: dict = {}
+    for elem in container.findall("Placeholder"):
+        name = elem.get("name")
+        if name:
+            placeholders[name] = _config_value(elem)
+
+    if not inputs and not placeholders:
+        return {}
+    return {"inputs": inputs, "placeholders": placeholders}
+
+
+def _config_value(elem: ET.Element):
+    """A Config entry carries its value in a boolean/number/string attribute."""
+    raw = elem.get("boolean")
+    if raw is not None:
+        return raw.strip().lower() == "true"
+    raw = elem.get("number")
+    if raw is not None:
+        try:
+            return int(raw) if "." not in raw else float(raw)
+        except ValueError:
+            return raw
+    return elem.get("string")

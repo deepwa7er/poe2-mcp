@@ -4,6 +4,7 @@ PoE2 MCP server.
 Tools:
   load_build      — decode a PoB export code or pobb.in URL
   get_stats       — computed character stats (life, mana, damage, resists, …)
+  get_config      — the PoB <Config> assumptions behind those stats (enemy setup, conditions)
   get_passives    — allocated passive nodes (with names/stats if tree data is loaded)
   get_items       — equipped items and their mods
   get_skills      — skill socket groups and gem links
@@ -106,9 +107,60 @@ def get_stats() -> list[dict]:
 
     These are the values Path of Building calculates: life, mana, energy shield,
     resistances, DPS for each skill, movement speed, etc.
+
+    Important: these are computed under the build's saved PoB <Config> (enemy
+    setup and which conditions/charges are active). DPS in particular reflects
+    those assumptions — call get_config to see them before interpreting it.
     """
     build = _require_build()
     return [{"stat": s.name, "value": s.value} for s in build.stats]
+
+
+@mcp.tool()
+def get_config() -> dict:
+    """
+    Return the PoB <Config> assumptions behind the loaded build's computed stats.
+
+    get_stats (and especially DPS) is calculated under these settings, so this is
+    what makes a number interpretable — e.g. whether the enemy is shocked, whether
+    charges are active, what enemy level/resistances are assumed.
+
+    Returns:
+      - active_conditions: condition* inputs currently set true (the conditional
+        damage/defence mods that are applied; anything not listed is treated as
+        inactive — so charges contribute only if a corresponding condition is set)
+      - multipliers: multiplier* values (nearby enemies, stacks, …)
+      - enemy: enemy* placeholders (level, resistances, damage, …)
+      - inputs / placeholders: the full raw config for anything else
+
+    Requires a loaded build. Returns a note if the export carried no config.
+    """
+    build = _require_build()
+    cfg = build.config or {}
+    inputs: dict = cfg.get("inputs", {})
+    placeholders: dict = cfg.get("placeholders", {})
+    if not inputs and not placeholders:
+        return {"note": "This build's export carried no <Config> block; stats use PoB defaults."}
+
+    active_conditions = sorted(
+        k[len("condition"):] for k, v in inputs.items()
+        if k.startswith("condition") and v is True
+    )
+    multipliers = {
+        k: v for k, v in {**placeholders, **inputs}.items() if k.startswith("multiplier")
+    }
+    enemy = {k: v for k, v in placeholders.items() if k.lower().startswith("enemy")}
+
+    return {
+        "active_conditions": active_conditions,
+        "multipliers": multipliers,
+        "enemy": enemy,
+        "inputs": inputs,
+        "placeholders": placeholders,
+        "note": "These assumptions produced get_stats. Conditions not in "
+                "active_conditions are treated as inactive (e.g. charges count only "
+                "if a corresponding condition/input is set).",
+    }
 
 
 @mcp.tool()

@@ -90,6 +90,42 @@ def test_parse_pob2_fieldmarker_item():
     assert item["mods"][item["implicit_count"]] == "19% increased Rarity of Items found"
 
 
+CONFIG_XML = """<PathOfBuilding2>
+  <Build level="68" className="Monk" ascendClassName="Invoker"/>
+  <Config activeConfigSet="2">
+    <ConfigSet title="Wrong" id="1">
+      <Input name="conditionEnemyChilled" boolean="true"/>
+    </ConfigSet>
+    <ConfigSet title="Default" id="2">
+      <Input name="conditionEnemyShocked" boolean="true"/>
+      <Input name="conditionCritRecently" boolean="false"/>
+      <Input name="multiplierNearbyEnemies" number="3"/>
+      <Input name="questReward" string="+5% to Fire Resistance"/>
+      <Placeholder name="enemyLevel" number="82"/>
+      <Placeholder name="enemyLightningResist" number="50"/>
+    </ConfigSet>
+  </Config>
+</PathOfBuilding2>"""
+
+
+def test_parse_config_honours_active_set_and_types():
+    build = parse_build_xml(CONFIG_XML)
+    inputs = build.config["inputs"]
+    placeholders = build.config["placeholders"]
+    # activeConfigSet=2 is used, not set 1.
+    assert inputs["conditionEnemyShocked"] is True
+    assert inputs["conditionCritRecently"] is False
+    assert "conditionEnemyChilled" not in inputs   # that was only in set 1
+    assert inputs["multiplierNearbyEnemies"] == 3   # number -> int
+    assert inputs["questReward"] == "+5% to Fire Resistance"
+    assert placeholders["enemyLevel"] == 82
+
+
+def test_parse_config_absent_is_empty():
+    build = parse_build_xml(BUILD_XML)  # no <Config>
+    assert build.config == {}
+
+
 def test_poeninja_export_items_parse_with_mods():
     """Regression: the real poe.ninja export must yield items with mods and ilvl."""
     code = (FIXTURES / "poeninja_pob_export.txt").read_text()

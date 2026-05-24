@@ -63,5 +63,7 @@ class Build:
     socket_groups: list[SocketGroup]
     stats: list[Stat]
     notes: str = ""
+    # The PoB <Config> behind `stats`: {"inputs": {...}, "placeholders": {...}}.
+    config: dict = field(default_factory=dict)
     # Resolved after loading tree data
     passive_nodes: list[PassiveNode] = field(default_factory=list)
