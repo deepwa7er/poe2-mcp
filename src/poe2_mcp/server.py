@@ -9,6 +9,14 @@ Tools:
   get_skills      — skill socket groups and gem links
   search_passives — find allocated passives matching a keyword
   search_tree     — find any node in the full passive tree (allocated or not)
+  get_reachable_nodes — unallocated nodes within N steps of the build
+  get_node        — inspect a single tree node and its neighbors
+  path_to_node    — shortest allocate-sequence from the build to a target node
+  get_point_budget — passive/ascendancy point usage summary
+  analyze_defenses — defensive sanity checks (resists, health pool)
+  get_meta_overview — poe.ninja ascendancy popularity for a league
+  list_top_builds — top community builds on the poe.ninja ladder
+  load_community_build — load a poe.ninja build by account + character name
 """
 
 from mcp.server.fastmcp import FastMCP
@@ -16,6 +24,8 @@ from mcp.server.fastmcp import FastMCP
 from .pob import decode_build_code, parse_build_xml, Build
 from .pob.models import Item, SkillGem, SocketGroup, Stat, PassiveNode
 from .tree import PassiveTree, TreeNode, load_default_tree
+from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
+from .community import poeninja
 
 mcp = FastMCP("poe2-mcp")
 
@@ -47,23 +57,32 @@ def load_build(code: str) -> str:
 
     Call this first before using any other tool.
     """
+    _load_build_from_xml(decode_build_code(code))
+    return _loaded_build_summary()
+
+
+def _load_build_from_xml(xml: str) -> Build:
+    """Parse XML into the module-level build, resolving passive names if tree data is present."""
     global _build, _tree
     if _tree is None:
         _tree = load_default_tree()
-    xml = decode_build_code(code)
     _build = parse_build_xml(xml)
-
-    # Resolve passive node names/stats if tree data is available
     if _tree is not None:
         _build.passive_nodes = _tree.resolve_ids(_build.allocated_node_ids)
+    return _build
 
-    parts = [f"Loaded: {_build.class_name}"]
-    if _build.ascendancy:
-        parts.append(f"({_build.ascendancy})")
-    parts.append(f"level {_build.level}")
-    parts.append(f"— {len(_build.allocated_node_ids)} passive nodes")
-    parts.append(f"— {len(_build.items)} items")
-    parts.append(f"— {len(_build.socket_groups)} skill groups")
+
+def _loaded_build_summary(source: str = "") -> str:
+    b = _require_build()
+    parts = [f"Loaded: {b.class_name}"]
+    if b.ascendancy:
+        parts.append(f"({b.ascendancy})")
+    parts.append(f"level {b.level}")
+    parts.append(f"— {len(b.allocated_node_ids)} passive nodes")
+    parts.append(f"— {len(b.items)} items")
+    parts.append(f"— {len(b.socket_groups)} skill groups")
+    if source:
+        parts.append(f"\nSource: {source}")
     if _tree is None:
         parts.append(
             "\n\nNote: passive tree data not found — passive names/stats unavailable. "
@@ -306,6 +325,157 @@ def get_reachable_nodes(
         }
         for n, dist in reachable
     ]
+
+
+@mcp.tool()
+def get_node(node_id: int) -> dict:
+    """
+    Inspect a single passive tree node by id, including its neighbors.
+
+    Returns the node's name, type, stats, ascendancy, and class region, plus the
+    list of directly connected nodes (id/name/type). Useful for navigating outward
+    from a node found via search_tree. Tree data must be loaded; no build required.
+    """
+    if _tree is None:
+        return {"error": "Tree data not loaded."}
+
+    node = _tree.get(node_id)
+    if node is None:
+        return {"error": f"No node with id {node_id} in the tree."}
+
+    allocated_ids: set[int] = set(_build.allocated_node_ids) if _build is not None else set()
+    return {
+        "id": node.id,
+        "name": node.name,
+        "type": _node_type(node),
+        "stats": node.stats,
+        "ascendancy": node.ascendancy_name,
+        "region": _tree.region_of(node.id),
+        "allocated": node.id in allocated_ids,
+        "neighbors": [
+            {"id": nb.id, "name": nb.name, "type": _node_type(nb)}
+            for nb in _tree.neighbor_nodes(node.id)
+        ],
+    }
+
+
+@mcp.tool()
+def path_to_node(node_id: int) -> dict:
+    """
+    Find the shortest sequence of nodes to allocate to reach a target node.
+
+    Computes the minimum-cost path from the current build's allocated nodes to the
+    target via unallocated pathing nodes. Returns the ordered list of nodes you would
+    need to take (build outward to target) and the passive-point cost (its length).
+
+    Requires both a loaded build and tree data. If the node is already allocated the
+    cost is 0; if it cannot be reached, points_required is null.
+    """
+    if _tree is None:
+        return {"error": "Tree data not loaded."}
+
+    build = _require_build()
+    target = _tree.get(node_id)
+    if target is None:
+        return {"error": f"No node with id {node_id} in the tree."}
+
+    path = _tree.shortest_path(set(build.allocated_node_ids), node_id)
+    if path is None:
+        return {
+            "target": {"id": target.id, "name": target.name, "type": _node_type(target)},
+            "points_required": None,
+            "path": [],
+            "message": "Target is unreachable from the current build.",
+        }
+
+    return {
+        "target": {"id": target.id, "name": target.name, "type": _node_type(target)},
+        "points_required": len(path),
+        "path": [
+            {"id": n.id, "name": n.name, "type": _node_type(n)}
+            for n in path
+        ],
+    }
+
+
+@mcp.tool()
+def get_point_budget() -> dict:
+    """
+    Summarize how the loaded build spends its passive and ascendancy points.
+
+    Breaks allocated nodes into normal tree points, ascendancy points, and the free
+    class start node, and reports points granted by leveling (a lower bound on points
+    available, since campaign quest points are not stored in the export).
+
+    Requires a loaded build; classification needs tree data.
+    """
+    build = _require_build()
+    return summarize_points(build, _tree)
+
+
+@mcp.tool()
+def analyze_defenses() -> list[dict]:
+    """
+    Run defensive sanity checks against the loaded build's computed stats.
+
+    Flags uncapped or negative elemental resistances (against the build's max-resist
+    stat, or the standard 75% cap), reports chaos resistance and the health pool, and
+    raises a heuristic warning when Life+ES looks low for the build's level.
+
+    Each finding has a severity (ok|warning|critical|info) and includes the underlying
+    value. Findings are heuristic, not a substitute for in-game testing. Requires a
+    loaded build.
+    """
+    build = _require_build()
+    return _analyze_defenses(build)
+
+
+@mcp.tool()
+def get_meta_overview(league: str | None = None) -> dict:
+    """
+    Show the current PoE2 build meta from poe.ninja: ascendancy popularity for a league.
+
+    Returns the league name, total tracked characters, and each ascendancy's share of
+    the population with a trend indicator (1 rising, 0 flat, -1 falling). Defaults to the
+    current indexed league; pass a league url (e.g. "vaal") or name to override.
+
+    Data is from poe.ninja's public (undocumented) builds API and is cached briefly.
+    No build needs to be loaded.
+    """
+    return poeninja.get_meta_overview(league)
+
+
+@mcp.tool()
+def list_top_builds(league: str | None = None, limit: int = 20) -> list[dict]:
+    """
+    List the top community builds on poe.ninja's ladder for a league.
+
+    Each entry includes rank, character name, account, class/ascendancy, level, and
+    headline stats (life, energy shield, effective HP, DPS — as poe.ninja displays them).
+    Use the returned account + character name with load_community_build to pull the full
+    build in for analysis.
+
+    Defaults to the current indexed league; pass a league url (e.g. "vaal") to override.
+    limit caps the number of rows (the ladder page holds ~100). No build needs to be loaded.
+    """
+    return poeninja.list_top_builds(league=league, limit=limit)
+
+
+@mcp.tool()
+def load_community_build(account: str, name: str, league: str | None = None) -> str:
+    """
+    Load a community build from poe.ninja by account and character name.
+
+    Fetches that character's Path of Building export from poe.ninja and loads it as the
+    active build, exactly as load_build would — afterwards every analysis tool (get_stats,
+    get_passives, analyze_defenses, path_to_node, …) operates on it.
+
+    Get the account and character name from list_top_builds. Pass the same league you
+    listed from if it was not the default.
+    """
+    code = poeninja.fetch_pob_export(account, name, league=league)
+    _load_build_from_xml(decode_build_code(code))
+    return _loaded_build_summary(source=f"poe.ninja — {name} ({account})")
 
 
 # ---------------------------------------------------------------------------

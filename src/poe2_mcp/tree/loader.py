@@ -69,6 +69,66 @@ class PassiveTree:
             results = [n for n in results if self._voronoi.get(n.id, "") in class_set]
         return results
 
+    def neighbor_nodes(self, node_id: int) -> list[TreeNode]:
+        """Return the resolved neighbor nodes of node_id (skipping any unknown ids)."""
+        node = self._nodes.get(node_id)
+        if node is None:
+            return []
+        return [self._nodes[n] for n in node.neighbors if n in self._nodes]
+
+    def shortest_path(
+        self, allocated_ids: set[int], target_id: int
+    ) -> list[TreeNode] | None:
+        """
+        Shortest sequence of nodes to allocate to reach target_id from the build.
+
+        Multi-source BFS seeded from every allocated node, tracking parents so the
+        path can be reconstructed. Returns the unallocated nodes that must be taken,
+        ordered from the build outward to the target. Returns:
+          - []   if target_id is already allocated
+          - None if target_id is unknown, unreachable, or no nodes are allocated
+        The number of passive points required is len(result).
+        """
+        if target_id not in self._nodes:
+            return None
+        if target_id in allocated_ids:
+            return []
+
+        parent: dict[int, int | None] = {}
+        queue: deque[int] = deque()
+        for sid in allocated_ids:
+            if sid in self._nodes:
+                parent[sid] = None
+                queue.append(sid)
+        if not queue:
+            return None
+
+        found = False
+        while queue:
+            node_id = queue.popleft()
+            if node_id == target_id:
+                found = True
+                break
+            node = self._nodes.get(node_id)
+            if node is None:
+                continue
+            for neighbor_id in node.neighbors:
+                if neighbor_id not in parent and neighbor_id in self._nodes:
+                    parent[neighbor_id] = node_id
+                    queue.append(neighbor_id)
+
+        if not found:
+            return None
+
+        path: list[int] = []
+        cur: int | None = target_id
+        while cur is not None:
+            path.append(cur)
+            cur = parent[cur]
+        path.reverse()  # source (allocated) ... target
+
+        return [self._nodes[i] for i in path if i not in allocated_ids]
+
     def nodes_within_distance(
         self, allocated_ids: set[int], max_distance: int
     ) -> list[tuple[TreeNode, int]]:

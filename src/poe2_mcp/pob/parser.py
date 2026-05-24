@@ -164,11 +164,29 @@ def _parse_skills(root: ET.Element) -> list[SocketGroup]:
     if skills_elem is None:
         return []
 
+    # PoB2 nests <Skill> elements inside <SkillSet> (honour activeSkillSet);
+    # PoB1 lists <Skill> directly under <Skills>.
+    skill_sets = skills_elem.findall("SkillSet")
+    if skill_sets:
+        active_set_id = skills_elem.get("activeSkillSet", "1")
+        active_set = next(
+            (s for s in skill_sets if s.get("id") == active_set_id),
+            skill_sets[0],
+        )
+        skill_elems = active_set.findall("Skill")
+    else:
+        skill_elems = skills_elem.findall("Skill")
+
     groups: list[SocketGroup] = []
-    for skill_elem in skills_elem.findall("Skill"):
-        slot = skill_elem.get("slot", "")
+    for skill_elem in skill_elems:
+        slot = skill_elem.get("slot", skill_elem.get("label", ""))
         enabled = skill_elem.get("enabled", "true").lower() == "true"
-        main_active_spec = int(skill_elem.get("mainActiveSpec", "1")) - 1
+        # PoB1 uses mainActiveSpec, PoB2 uses mainActiveSkill (both 1-based).
+        main_active = skill_elem.get("mainActiveSkill", skill_elem.get("mainActiveSpec", "1"))
+        try:
+            main_active_spec = int(main_active) - 1
+        except ValueError:
+            main_active_spec = 0
 
         gems: list[SkillGem] = []
         active_skill = ""
