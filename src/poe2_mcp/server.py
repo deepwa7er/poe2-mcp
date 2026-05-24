@@ -143,8 +143,10 @@ def get_items() -> list[dict]:
     """
     Return all equipped items in the loaded build with their mods.
 
-    Each item includes slot, rarity, name, base type, item level, and the list
-    of mod lines exactly as they appear in the game tooltip.
+    Each item includes slot, rarity, name, base type, item level, quality, any
+    socketed runes, and the list of mod lines exactly as they appear in the game
+    tooltip. implicit_count is how many leading entries in mods are implicit
+    (including enchants and rune-granted lines); the remainder are explicit.
     """
     build = _require_build()
     return [
@@ -154,7 +156,10 @@ def get_items() -> list[dict]:
             "name": item.name,
             "base_type": item.base_type,
             "item_level": item.item_level,
+            "quality": item.quality,
             "corrupted": item.corrupted,
+            "runes": item.runes,
+            "implicit_count": item.implicit_count,
             "mods": item.mods,
         }
         for item in build.items

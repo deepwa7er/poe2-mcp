@@ -27,6 +27,11 @@ class Item:
     mods: list[str] = field(default_factory=list)
     corrupted: bool = False
     raw_text: str = ""
+    quality: int = 0
+    runes: list[str] = field(default_factory=list)
+    # Number of leading entries in `mods` that are implicit (incl. enchants/runes);
+    # the rest are explicit. 0 when the source format does not declare implicits.
+    implicit_count: int = 0
 
 
 @dataclass

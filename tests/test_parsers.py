@@ -1,5 +1,10 @@
+from pathlib import Path
+
+from poe2_mcp.pob.decoder import decode_build_code
 from poe2_mcp.pob.item_parser import parse_item_text
 from poe2_mcp.pob.parser import parse_build_xml
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 RARE_ITEM = """Rarity: Rare
 Doom Bane
@@ -35,6 +40,65 @@ def test_parse_magic_item_uses_name_as_base():
     item = parse_item_text(raw, "Boots")
     assert item["rarity"] == "Magic"
     assert item["base_type"] == "Sturdy Iron Greaves of Haste"
+
+
+# poe.ninja / PoB2 export format: no "--------" dividers, field markers instead,
+# affix tags on mod lines, and an explicit "Implicits: N" count. This layout is
+# what silently produced empty mods before the parser was made marker-driven.
+PB2_ITEM = """Rarity: RARE
+Hate Brow
+Imperial Greathelm
+Armour: 531
+Unique ID: 9d5fbaa2536b1daefb4ae29aea5c02276ea7ba1e9ec7a0a7e62acade1ebd4361
+Item Level: 82
+Quality: 21
+Sockets: S S
+Rune: Idol of Eeshta
+Rune: Tzamoto's Soul Core of Ferocity
+LevelReq: 80
+Implicits: 4
+{enchant}{rune}12% increased Cost Efficiency
+{enchant}{rune}+4 to Maximum Rage
+{enchant}{rune}Bonded: Meta Skills have 12% increased Reservation Efficiency
+{enchant}+29 to Spirit
+{fractured}19% increased Rarity of Items found
+{desecrated}+45% to Lightning Resistance
+39% increased Armour
++211 to maximum Life
+18% increased Rarity of Items found
+34% increased Critical Hit Chance
+Corrupted"""
+
+
+def test_parse_pob2_fieldmarker_item():
+    item = parse_item_text(PB2_ITEM, "Helmet")
+    assert item["rarity"] == "Rare"            # normalised from "RARE"
+    assert item["name"] == "Hate Brow"
+    assert item["base_type"] == "Imperial Greathelm"
+    assert item["item_level"] == 82
+    assert item["quality"] == 21
+    assert item["corrupted"] is True
+    assert item["runes"] == ["Idol of Eeshta", "Tzamoto's Soul Core of Ferocity"]
+    # Affix tags are stripped; metadata never leaks into mods.
+    assert "+211 to maximum Life" in item["mods"]
+    assert "+45% to Lightning Resistance" in item["mods"]
+    assert "Bonded: Meta Skills have 12% increased Reservation Efficiency" in item["mods"]
+    assert not any(m.startswith("{") for m in item["mods"])
+    assert not any("Unique ID" in m or "Sockets" in m or "Armour:" in m for m in item["mods"])
+    # First 4 mods are the declared implicits.
+    assert item["implicit_count"] == 4
+    assert item["mods"][item["implicit_count"]] == "19% increased Rarity of Items found"
+
+
+def test_poeninja_export_items_parse_with_mods():
+    """Regression: the real poe.ninja export must yield items with mods and ilvl."""
+    code = (FIXTURES / "poeninja_pob_export.txt").read_text()
+    build = parse_build_xml(decode_build_code(code))
+    assert build.items, "expected the fixture build to have items"
+    enriched = [it for it in build.items if it.mods]
+    # Most rare/unique gear should now carry parsed mods (was 0 across the board).
+    assert len(enriched) >= len(build.items) // 2
+    assert any(it.item_level > 0 for it in build.items)
 
 
 BUILD_XML = """<PathOfBuilding>

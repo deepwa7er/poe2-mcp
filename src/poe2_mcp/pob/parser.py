@@ -234,16 +234,3 @@ def _parse_notes(root: ET.Element) -> str:
     if notes_elem is None:
         return ""
     return (notes_elem.text or "").strip()
-
-
-def _empty(slot: str, raw: str) -> dict:
-    return {
-        "slot": slot,
-        "rarity": "Normal",
-        "name": "",
-        "base_type": "",
-        "item_level": 0,
-        "mods": [],
-        "corrupted": False,
-        "raw_text": raw,
-    }
