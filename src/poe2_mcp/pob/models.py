@@ -41,6 +41,8 @@ class SkillGem:
     quality: int
     is_active: bool
     enabled: bool = True
+    skill_id: str = ""
+    gem_id: str = ""
 
 
 @dataclass

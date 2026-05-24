@@ -211,6 +211,8 @@ def _parse_skills(root: ET.Element) -> list[SocketGroup]:
                 quality=quality,
                 is_active=is_active,
                 enabled=gem_enabled,
+                skill_id=gem_elem.get("skillId", ""),
+                gem_id=gem_elem.get("gemId", ""),
             ))
 
         if not gems:

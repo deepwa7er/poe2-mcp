@@ -7,6 +7,8 @@ Tools:
   get_passives    — allocated passive nodes (with names/stats if tree data is loaded)
   get_items       — equipped items and their mods
   get_skills      — skill socket groups and gem links
+  get_skill_details — a gem's mechanics (tags, spirit reservation, charge use) from the PoB2 db
+  get_spirit_reservation — the loaded build's spirit reservation breakdown
   search_passives — find allocated passives matching a keyword
   search_tree     — find any node in the full passive tree (allocated or not)
   get_reachable_nodes — unallocated nodes within N steps of the build
@@ -28,6 +30,7 @@ from mcp.server.fastmcp import FastMCP
 from .pob import decode_build_code, parse_build_xml, Build
 from .pob.models import Item, SkillGem, SocketGroup, Stat, PassiveNode
 from .tree import PassiveTree, TreeNode, load_default_tree
+from .skills import GemData, load_default_gem_data
 from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
 from .community import poeninja
 
@@ -36,6 +39,7 @@ mcp = FastMCP("poe2-mcp")
 # Module-level state — single-user personal tool, single process
 _build: Build | None = None
 _tree: PassiveTree | None = load_default_tree()
+_gems: GemData | None = load_default_gem_data()
 
 
 def _require_build() -> Build:
@@ -172,7 +176,8 @@ def get_skills() -> list[dict]:
     Return all skill socket groups in the loaded build.
 
     Each group shows the active skill, its support gems, the slot it occupies,
-    and whether it is enabled.
+    and whether it is enabled. Each gem includes its skill_id — pass that (or the
+    gem name) to get_skill_details to look up the gem's mechanics.
     """
     build = _require_build()
     return [
@@ -187,12 +192,90 @@ def get_skills() -> list[dict]:
                     "quality": gem.quality,
                     "is_active": gem.is_active,
                     "enabled": gem.enabled,
+                    "skill_id": gem.skill_id,
                 }
                 for gem in group.gems
             ],
         }
         for group in build.socket_groups
     ]
+
+
+@mcp.tool()
+def get_skill_details(query: str) -> dict:
+    """
+    Look up a skill or support gem's mechanics in the bundled PoB2 gem database.
+
+    Accepts a display name ("Falling Thunder", "Combat Frenzy") or a skill_id from
+    get_skills ("FallingThunderPlayer"). Returns the gem's name, tags (skill_types),
+    base Spirit reservation, mechanic description, and derived flags:
+      - reserves_spirit         — holds a Spirit reservation while active
+      - generates_charges       — grants charges (e.g. on freeze/electrocute/kill)
+      - consumes_power_charges  — spends power charges for added effect
+
+    No build needs to be loaded. Returns an error if the gem database is absent
+    (generate it with scripts/build_skill_data.py or set SKILL_DATA_PATH).
+    """
+    if _gems is None:
+        return {"error": "Gem database not loaded. Generate data/poe2_skills.json "
+                         "via scripts/build_skill_data.py, or set SKILL_DATA_PATH."}
+    skill = _gems.get(query)
+    if skill is None:
+        return {"error": f"No skill matching {query!r} in the gem database."}
+    return skill
+
+
+@mcp.tool()
+def get_spirit_reservation() -> dict:
+    """
+    Summarize the loaded build's Spirit reservation.
+
+    Cross-references each socket group's active skill against the gem database to
+    list which skills reserve Spirit and their base cost, alongside the build's
+    actual Spirit total/reserved/free from its computed stats. Use this to see what
+    can be dropped to fit another reservation skill.
+
+    Per-skill values are base reservation; spirit_reserved_actual already reflects
+    reservation-efficiency modifiers, so the two can differ. Requires a loaded build
+    and the gem database.
+    """
+    build = _require_build()
+    if _gems is None:
+        return {"error": "Gem database not loaded."}
+
+    def _stat(name: str) -> float | None:
+        for s in build.stats:
+            if s.name == name:
+                try:
+                    return float(s.value)
+                except ValueError:
+                    return None
+        return None
+
+    reservers: list[dict] = []
+    base_total = 0
+    for group in build.socket_groups:
+        active = next((g for g in group.gems if g.is_active), None)
+        if active is None:
+            continue
+        data = _gems.get(active.skill_id or active.name)
+        if data and data.get("reserves_spirit") and data.get("spirit_reservation", 0) > 0:
+            cost = data["spirit_reservation"]
+            base_total += cost
+            reservers.append({"skill": data["name"], "base_spirit_reservation": cost})
+
+    spirit = _stat("Spirit")
+    unreserved = _stat("SpiritUnreserved")
+    out: dict = {
+        "spirit_total": spirit,
+        "spirit_unreserved": unreserved,
+        "spirit_reserved_actual": (spirit - unreserved) if spirit is not None and unreserved is not None else None,
+        "reserving_skills": reservers,
+        "base_reservation_sum": base_total,
+        "note": "Per-skill values are base reservation; spirit_reserved_actual reflects "
+                "reservation-efficiency mods and is authoritative.",
+    }
+    return out
 
 
 @mcp.tool()

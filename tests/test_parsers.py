@@ -157,7 +157,7 @@ PB2_SKILLS = """<PathOfBuilding2>
     </SkillSet>
     <SkillSet id="2">
       <Skill mainActiveSkill="1" enabled="true">
-        <Gem nameSpec="Walking Calamity" level="21" quality="23"/>
+        <Gem nameSpec="Walking Calamity" level="21" quality="23" skillId="WalkingCalamityPlayer"/>
         <Gem nameSpec="Ambrosia II" level="1" quality="0"/>
       </Skill>
     </SkillSet>
@@ -172,3 +172,4 @@ def test_parse_pob2_skillset_nesting():
     group = build.socket_groups[0]
     assert group.active_skill == "Walking Calamity"   # from activeSkillSet=2, mainActiveSkill=1
     assert len(group.gems) == 2
+    assert group.gems[0].skill_id == "WalkingCalamityPlayer"   # skillId flows through
