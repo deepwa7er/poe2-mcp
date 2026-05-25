@@ -41,6 +41,8 @@ class PobEngine:
         self._q: queue.Queue[str | None] = queue.Queue()
         self._lock = threading.Lock()
         self._id = 0
+        self._cache: dict[tuple, dict] = {}      # (xml, overrides, stats, group) -> output
+        self._versions: dict[int, dict] = {}     # hash(xml) -> {tree_version, pob_tree_version}
         atexit.register(self.close)
 
     # -- lifecycle ---------------------------------------------------------
@@ -129,8 +131,13 @@ class PobEngine:
     def ping(self) -> bool:
         return bool(self._request(cmd="ping").get("pong"))
 
-    def load(self, xml: str) -> None:
-        self._request(cmd="load", xml=xml)
+    def load(self, xml: str) -> dict:
+        resp = self._request(cmd="load", xml=xml)
+        self._versions[hash(xml)] = {
+            "tree_version": resp.get("tree_version"),
+            "pob_tree_version": resp.get("pob_tree_version"),
+        }
+        return resp
 
     def set_config(self, overrides: dict) -> None:
         self._request(cmd="set_config", overrides=overrides)
@@ -141,13 +148,41 @@ class PobEngine:
     def recompute(self, xml: str, overrides: dict | None = None,
                   stats: list[str] | None = None, skill_group: int | None = None) -> dict:
         """Load a build, optionally select a skill group and apply config overrides,
-        then return the requested computed stats."""
+        then return the requested computed stats. Results are cached per
+        (build, overrides, stats, skill_group) — identical calls skip the round-trip."""
+        key = (
+            hash(xml),
+            tuple(sorted((overrides or {}).items())),
+            tuple(stats or ()),
+            skill_group,
+        )
+        if key in self._cache:
+            return self._cache[key]
+
         self.load(xml)
         if skill_group is not None:
             self._request(cmd="select_skill", group=skill_group)
         if overrides:
             self.set_config(overrides)
-        return self.get_output(stats)
+        out = self.get_output(stats)
+
+        self._cache[key] = out
+        if len(self._cache) > 64:                 # simple bound, FIFO eviction
+            self._cache.pop(next(iter(self._cache)))
+        return out
+
+    def version_note(self, xml: str) -> str | None:
+        """A caveat string if the build's tree version differs from PoB's bundled
+        data (some passives may not map), else None."""
+        v = self._versions.get(hash(xml)) or {}
+        bt, pt = v.get("tree_version"), v.get("pob_tree_version")
+        if bt and pt and str(bt) != str(pt):
+            return (
+                f"Build tree version {bt} differs from the bundled PoB data ({pt}); "
+                "some passives may not map and the result can be approximate. "
+                "Pin POB_REF to a PoB release matching the league to align them."
+            )
+        return None
 
 
 _engine: PobEngine | None = None

@@ -33,6 +33,18 @@ def test_recompute_integration():
         eng.close()
 
 
+@pytest.mark.skipif(not _pob_available, reason="set POB_FORK_PATH to a PoB2 checkout to run")
+def test_recompute_caches_identical_calls():
+    xml = decode_build_code((FIXTURES / "poeninja_pob_export.txt").read_text())
+    eng = PobEngine()
+    try:
+        a = eng.recompute(xml, stats=["TotalDPS"])
+        b = eng.recompute(xml, stats=["TotalDPS"])
+        assert a is b  # second identical call is served from cache
+    finally:
+        eng.close()
+
+
 def _server_tool(name):
     from poe2_mcp import server
     tool = getattr(server, name)

@@ -64,9 +64,34 @@ overrides, recomputes, returns stats. Requests are serialized (single process).
 
 | Var | Meaning | Default |
 |---|---|---|
-| `POB_FORK_PATH` | PoB2 `src/` checkout dir | `~/.cache/poe2-mcp/pob` |
+| `POB_FORK_PATH` | PoB2 clone root (contains `src/` and `runtime/`) | `~/.cache/poe2-mcp/pob` |
+| `POB_REF` | git ref to pin when cloning | `v2.49.3` |
 | `POB_CMD` | Lua interpreter | `luajit` |
 | `POB_TIMEOUT_MS` | per-request timeout | `10000` |
+| `POB_DRIVER` | override path to `pob_driver.lua` | repo `lua/pob_driver.lua` |
+
+## Usage
+
+```bash
+# One-time: fetch + prepare the headless PoB environment (~574 MB clone)
+uv run python scripts/setup_pob.py --selftest
+```
+
+Then, with a build loaded, the MCP tools recompute against it:
+
+- `recompute_stats(config_overrides, stats)` — run PoB under arbitrary `<Config>`
+  overrides (keys from `get_config`), e.g. `{"usePowerCharges": true,
+  "conditionEnemyShocked": true}`.
+- `compare_dps(preset)` — `unbuffed` vs a preset (`charges` / `shocked` / `combat`),
+  returning both DPS values and the delta.
+
+If `POB_FORK_PATH` is unset/missing, these tools return `{available: false}` with
+setup instructions; the rest of the server is unaffected.
+
+Results are cached per `(build, overrides, stats, skill_group)`, so repeated calls
+skip the round-trip. When a build's tree version differs from the bundled PoB data,
+responses include a `note` flagging that some passives may not map (pin `POB_REF` to
+the matching league to remove it).
 
 ## Milestones
 
@@ -81,36 +106,37 @@ fails, stop and reassess.*
 = true` (via `configTab.input` → `BuildModList` → `buildFlag` → `OnFrame`) → `464798`
 (**+29%**). The recomputed output responds to config overrides as designed.
 
-### M1 — Reproducible environment (`scripts/setup_pob.py`)
+### M1 — Reproducible environment (`scripts/setup_pob.py`) ✅ DONE
 Clone PoB2 pinned to a commit to `POB_FORK_PATH`; resolve `lua-utf8` (luarocks, with a
 documented prebuilt-`.so` fallback); self-test that loads a sample build and asserts Life.
 **Acceptance:** `setup_pob.py --selftest` exits 0 on a clean machine; version recorded.
 
-### M2 — Lua stdio driver (`lua/pob_driver.lua`)
+### M2 — Lua stdio driver (`lua/pob_driver.lua`) ✅ DONE
 Owns the bootstrap; line-delimited JSON protocol: `ping`, `load{xml}`,
 `set_config{overrides}`, `select_skill{group}`, `get_output{stats}`, `shutdown`. Every
 command wrapped in `pcall` so a bad build can't kill the daemon.
 **Acceptance:** piping JSON lines returns correct stats; malformed build → error
 response, not a crash.
 
-### M3 — Python engine client (`src/poe2_mcp/pob_engine/`)
+### M3 — Python engine client (`src/poe2_mcp/pob_engine/`) ✅ DONE
 `PobEngine`: spawn, request/response with timeout, auto-restart on crash/timeout, lazy
 start, `available()` probe, clean shutdown.
 **Acceptance:** unit tests (framing/timeout/restart, fake subprocess) + one integration
 test gated on `POB_FORK_PATH` asserting recomputed Life ≈ stored Life.
 
-### M4 — MCP tools + presets
+### M4 — MCP tools + presets ✅ DONE
 `recompute_stats(config_overrides)` and `compare_dps(preset)` (e.g. `combat` = power
 charges max + enemy shocked + crit recently). Preset knob names come from P1.5's
 `get_config` vocabulary. Tools no-op gracefully when the engine is unavailable.
 **Acceptance:** `compare_dps("combat")` returns two DPS values differing in the expected
 direction.
 
-### M5 — Robustness, caching, docs
-Cache by `(build_hash, overrides_hash)`; surface tree-version drift (the "missing node"
-warnings) as a caveat; troubleshooting docs.
-**Acceptance:** repeated identical calls hit cache; drifted build returns results with a
-version-mismatch note.
+### M5 — Robustness, caching, docs ✅ DONE
+Cache by `(build, overrides, stats, skill_group)`; surface tree-version drift by
+comparing the build's `spec.treeVersion` with PoB's `latestTreeVersion`; usage docs
+above.
+**Acceptance:** repeated identical calls hit cache (return the same object); a build
+whose tree version differs from the bundled data gets a `note`.
 
 ## Risks
 

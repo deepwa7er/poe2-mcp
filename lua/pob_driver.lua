@@ -62,7 +62,11 @@ end
 function handlers.load(req)
 	if type(req.xml) ~= "string" then error("load requires an 'xml' string") end
 	loadBuildFromXML(req.xml, req.name or "engine")
-	return {}
+	-- Surface tree-version drift: the build's tree version vs PoB's bundled data.
+	return {
+		tree_version = build and build.spec and build.spec.treeVersion,
+		pob_tree_version = latestTreeVersion,
+	}
 end
 
 function handlers.set_config(req)

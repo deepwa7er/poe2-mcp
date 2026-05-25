@@ -202,7 +202,11 @@ def recompute_stats(config_overrides: dict | None = None, stats: list[str] | Non
         out = engine.recompute(_build_xml, overrides=config_overrides or {}, stats=stats)
     except PobEngineError as e:
         return {"available": True, "error": str(e)}
-    return {"available": True, "overrides": config_overrides or {}, "stats": out}
+    res = {"available": True, "overrides": config_overrides or {}, "stats": out}
+    note = engine.version_note(_build_xml)
+    if note:
+        res["note"] = note
+    return res
 
 
 @mcp.tool()
@@ -231,7 +235,7 @@ def compare_dps(preset: str = "combat") -> dict:
         return {"available": True, "error": str(e)}
     b = base.get("TotalDPS") or 0
     s = buffed.get("TotalDPS") or 0
-    return {
+    res = {
         "available": True,
         "preset": preset,
         "overrides": PRESETS[preset],
@@ -239,6 +243,10 @@ def compare_dps(preset: str = "combat") -> dict:
         "preset_dps": s,
         "delta_pct": round((s / b - 1) * 100, 1) if b else None,
     }
+    note = engine.version_note(_build_xml)
+    if note:
+        res["note"] = note
+    return res
 
 
 @mcp.tool()
