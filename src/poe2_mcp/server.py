@@ -169,14 +169,13 @@ def get_config() -> dict:
     }
 
 
-def _engine_unavailable_msg() -> dict:
-    eng = get_engine()
+def _engine_error(e: PobEngineError) -> dict:
     return {
         "available": False,
-        "error": f"Headless PoB engine not set up (looked in {eng.root}).",
-        "hint": "Invoke the /poe2-engine-setup skill (one-time), or run "
-                "`uv run python scripts/setup_pob.py --selftest`, or set POB_FORK_PATH "
-                "to an existing PoB2 checkout.",
+        "error": str(e),
+        "hint": "Recompute runs Path of Building headless. It needs LuaJIT installed; "
+                "PoB itself is fetched automatically on first use (slim, ~50 MB). For "
+                "manual control or pre-fetch: `uv run python scripts/setup_pob.py`.",
     }
 
 
@@ -210,12 +209,10 @@ def list_skill_groups() -> dict:
     """
     _require_build()
     engine = get_engine()
-    if not engine.available():
-        return _engine_unavailable_msg()
     try:
         return {"available": True, "skills": engine.skill_groups(_build_xml)}
     except PobEngineError as e:
-        return {"available": True, "error": str(e)}
+        return _engine_error(e)
 
 
 @mcp.tool()
@@ -240,15 +237,13 @@ def recompute_stats(config_overrides: dict | None = None, stats: list[str] | Non
     """
     _require_build()
     engine = get_engine()
-    if not engine.available():
-        return _engine_unavailable_msg()
-    group, err = _resolve_skill_group(engine, skill)
-    if err:
-        return {"available": True, "error": err}
     try:
+        group, err = _resolve_skill_group(engine, skill)
+        if err:
+            return {"available": True, "error": err}
         out = engine.recompute(_build_xml, overrides=config_overrides or {}, stats=stats, skill_group=group)
     except PobEngineError as e:
-        return {"available": True, "error": str(e)}
+        return _engine_error(e)
     res = {"available": True, "skill": skill, "overrides": config_overrides or {}, "stats": out}
     note = engine.version_note(_build_xml)
     if note:
@@ -274,16 +269,14 @@ def compare_dps(preset: str = "combat", skill: int | str | None = None) -> dict:
     if preset not in PRESETS:
         return {"error": f"unknown preset {preset!r}", "available_presets": sorted(PRESETS)}
     engine = get_engine()
-    if not engine.available():
-        return _engine_unavailable_msg()
-    group, err = _resolve_skill_group(engine, skill)
-    if err:
-        return {"available": True, "error": err}
     try:
+        group, err = _resolve_skill_group(engine, skill)
+        if err:
+            return {"available": True, "error": err}
         base = engine.recompute(_build_xml, stats=["TotalDPS"], skill_group=group)
         buffed = engine.recompute(_build_xml, overrides=PRESETS[preset], stats=["TotalDPS"], skill_group=group)
     except PobEngineError as e:
-        return {"available": True, "error": str(e)}
+        return _engine_error(e)
     b = base.get("TotalDPS") or 0
     s = buffed.get("TotalDPS") or 0
     res = {

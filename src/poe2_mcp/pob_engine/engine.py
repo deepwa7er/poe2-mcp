@@ -22,7 +22,8 @@ import subprocess
 import threading
 from pathlib import Path
 
-DEFAULT_PATH = Path.home() / ".cache" / "poe2-mcp" / "pob"
+from .setup import DEFAULT_PATH, DEFAULT_REF, SetupError, ensure_pob, is_set_up
+
 _DRIVER = Path(__file__).resolve().parents[3] / "lua" / "pob_driver.lua"
 
 
@@ -32,11 +33,16 @@ class PobEngineError(RuntimeError):
 
 class PobEngine:
     def __init__(self, root: str | Path | None = None, cmd: str | None = None,
-                 timeout_ms: int | None = None, driver: str | Path | None = None):
+                 timeout_ms: int | None = None, driver: str | Path | None = None,
+                 ref: str | None = None, autosetup: bool | None = None):
         self.root = Path(root or os.environ.get("POB_FORK_PATH") or DEFAULT_PATH)
         self.cmd = cmd or os.environ.get("POB_CMD") or "luajit"
         self.timeout = (timeout_ms or int(os.environ.get("POB_TIMEOUT_MS", "10000"))) / 1000
         self.driver = Path(driver or os.environ.get("POB_DRIVER") or _DRIVER)
+        self.ref = ref or os.environ.get("POB_REF") or DEFAULT_REF
+        # Fetch PoB automatically on first use (the clone is small/fast now). Opt out
+        # with POB_AUTOSETUP=0 or autosetup=False.
+        self.autosetup = (os.environ.get("POB_AUTOSETUP", "1") != "0") if autosetup is None else autosetup
         self._proc: subprocess.Popen | None = None
         self._q: queue.Queue[str | None] = queue.Queue()
         self._lock = threading.Lock()
@@ -49,21 +55,34 @@ class PobEngine:
     # -- lifecycle ---------------------------------------------------------
 
     def available(self) -> bool:
-        """True if PoB is set up and the Lua interpreter is on PATH."""
+        """True if recompute can run now or be made to run: the Lua interpreter is on
+        PATH and the driver exists, and PoB is either set up or can be auto-fetched."""
         return (
-            (self.root / "src" / "HeadlessWrapper.lua").exists()
+            shutil.which(self.cmd) is not None
             and self.driver.exists()
-            and shutil.which(self.cmd) is not None
+            and (is_set_up(self.root) or self.autosetup)
         )
 
     def _start(self) -> None:
         if self._proc and self._proc.poll() is None:
             return
-        if not self.available():
+        if shutil.which(self.cmd) is None:
             raise PobEngineError(
-                f"Headless PoB not available (looked in {self.root}). "
-                "Run `uv run python scripts/setup_pob.py` first."
+                f"'{self.cmd}' not found on PATH — install LuaJIT to enable DPS recompute "
+                "(e.g. `sudo dnf install luajit`, `brew install luajit`, `apt install luajit`)."
             )
+        if not self.driver.exists():
+            raise PobEngineError(f"PoB driver not found at {self.driver}.")
+        if not is_set_up(self.root):
+            if not self.autosetup:
+                raise PobEngineError(
+                    f"Headless PoB not set up in {self.root}. Run "
+                    "`uv run python scripts/setup_pob.py`, or set POB_AUTOSETUP=1."
+                )
+            try:
+                ensure_pob(self.root, ref=self.ref, cmd=self.cmd)  # slim ~50MB fetch, one-time
+            except SetupError as e:
+                raise PobEngineError(f"automatic PoB setup failed: {e}") from e
         self._proc = subprocess.Popen(
             [self.cmd, str(self.driver), str(self.root)],
             cwd=self.root / "src",

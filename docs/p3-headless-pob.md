@@ -72,15 +72,20 @@ overrides, recomputes, returns stats. Requests are serialized (single process).
 
 ## Usage
 
-One-time, to fetch + prepare the headless PoB environment (a slim ~50 MB clone — code
-and data only, no textures — taking a few seconds): invoke the **`/poe2-engine-setup`**
-skill, or run the script directly:
+**No manual setup is needed.** On the first call to a recompute tool, the engine
+auto-fetches PoB if it's missing — a slim ~50 MB clone (code and data only, no
+textures) that takes a few seconds, cached in `~/.cache/poe2-mcp/pob`. The only host
+requirement is **LuaJIT** on `PATH`; if it's missing the tools say so. Disable
+auto-fetch with `POB_AUTOSETUP=0`.
+
+The script is optional — for pre-fetching (e.g. before going offline), re-cloning after
+a PoB update (`--force`), or verifying the install boots:
 
 ```bash
 uv run python scripts/setup_pob.py --selftest
 ```
 
-Then, with a build loaded, the MCP tools recompute against it:
+With a build loaded, the MCP tools recompute against it:
 
 - `list_skill_groups()` — the build's skill groups as PoB indexes them (index, skill
   name, is_main); use it to find the `skill` argument below.

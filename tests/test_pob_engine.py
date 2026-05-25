@@ -13,7 +13,8 @@ _pob_available = bool(_root) and (Path(_root) / "src" / "HeadlessWrapper.lua").e
 
 
 def test_unavailable_engine_reports_and_errors(tmp_path):
-    eng = PobEngine(root=tmp_path)
+    # autosetup=False so the test never triggers a network clone.
+    eng = PobEngine(root=tmp_path, autosetup=False)
     assert eng.available() is False
     with pytest.raises(PobEngineError):
         eng.recompute("<PathOfBuilding/>")
