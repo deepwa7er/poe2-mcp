@@ -174,8 +174,9 @@ def _engine_unavailable_msg() -> dict:
     return {
         "available": False,
         "error": f"Headless PoB engine not set up (looked in {eng.root}).",
-        "hint": "Run `uv run python scripts/setup_pob.py --selftest`, "
-                "or set POB_FORK_PATH to a PoB2 checkout.",
+        "hint": "Invoke the /poe2-engine-setup skill (one-time), or run "
+                "`uv run python scripts/setup_pob.py --selftest`, or set POB_FORK_PATH "
+                "to an existing PoB2 checkout.",
     }
 
 

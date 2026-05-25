@@ -72,8 +72,10 @@ overrides, recomputes, returns stats. Requests are serialized (single process).
 
 ## Usage
 
+One-time, to fetch + prepare the headless PoB environment (~574 MB clone): invoke the
+**`/poe2-engine-setup`** skill, or run the script directly:
+
 ```bash
-# One-time: fetch + prepare the headless PoB environment (~574 MB clone)
 uv run python scripts/setup_pob.py --selftest
 ```
 
