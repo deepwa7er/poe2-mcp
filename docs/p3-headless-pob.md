@@ -65,15 +65,16 @@ overrides, recomputes, returns stats. Requests are serialized (single process).
 | Var | Meaning | Default |
 |---|---|---|
 | `POB_FORK_PATH` | PoB2 clone root (contains `src/` and `runtime/`) | `~/.cache/poe2-mcp/pob` |
-| `POB_REF` | git ref to pin when cloning | `v2.49.3` |
+| `POB_REF` | git ref to clone (the PoE2 data is on `dev`; v2.x tags are legacy PoE1) | `dev` |
 | `POB_CMD` | Lua interpreter | `luajit` |
 | `POB_TIMEOUT_MS` | per-request timeout | `10000` |
 | `POB_DRIVER` | override path to `pob_driver.lua` | repo `lua/pob_driver.lua` |
 
 ## Usage
 
-One-time, to fetch + prepare the headless PoB environment (~574 MB clone): invoke the
-**`/poe2-engine-setup`** skill, or run the script directly:
+One-time, to fetch + prepare the headless PoB environment (a slim ~50 MB clone — code
+and data only, no textures — taking a few seconds): invoke the **`/poe2-engine-setup`**
+skill, or run the script directly:
 
 ```bash
 uv run python scripts/setup_pob.py --selftest

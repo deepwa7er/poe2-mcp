@@ -33,8 +33,20 @@ import tempfile
 from pathlib import Path
 
 REPO_URL = "https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2.git"
-DEFAULT_REF = "v2.49.3"
+# The PoE2 data lives on `dev`; the v2.x release tags carry legacy PoE1 tree data.
+DEFAULT_REF = "dev"
 DEFAULT_PATH = Path.home() / ".cache" / "poe2-mcp" / "pob"
+
+# Sparse-checkout patterns: take everything except files headless calc never uses —
+# image/font art (image loads are stubbed), platform binaries, and zipped blobs.
+# This trims the working tree from ~574 MB to a fraction.
+_SPARSE_PATTERNS = [
+    "/**",
+    "!**/*.dds", "!**/*.png", "!**/*.jpg", "!**/*.jpeg", "!**/*.gif",
+    "!**/*.ico", "!**/*.bmp", "!**/*.ttf",
+    "!**/*.dll", "!**/*.dylib", "!**/*.so", "!**/*.zip",
+    "!**/*.zst",  # zstd-compressed .dds tree/ascendancy textures (the bulk of TreeData)
+]
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _UTF8_FALLBACK = _REPO_ROOT / "lua" / "compat" / "lua-utf8.lua"
 
@@ -55,6 +67,13 @@ def _run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, text=True, capture_output=True, **kw)
 
 
+def _git(args: list[str]) -> subprocess.CompletedProcess:
+    r = _run(["git", *args])
+    if r.returncode != 0:
+        sys.exit(f"git {' '.join(args[:3])} failed:\n{r.stderr}")
+    return r
+
+
 def clone(force: bool) -> Path:
     root = pob_root()
     wrapper = root / "src" / "HeadlessWrapper.lua"
@@ -66,10 +85,14 @@ def clone(force: bool) -> Path:
         shutil.rmtree(root)
     root.parent.mkdir(parents=True, exist_ok=True)
     ref = pob_ref()
-    print(f"Cloning {REPO_URL} @ {ref} (depth 1) -> {root}")
-    r = _run(["git", "clone", "--depth", "1", "--single-branch", "--branch", ref, REPO_URL, str(root)])
-    if r.returncode != 0:
-        sys.exit(f"git clone failed:\n{r.stderr}")
+    print(f"Cloning {REPO_URL} @ {ref} (blobless, code+data only) -> {root}")
+    # Partial clone: fetch the commit graph but no file contents and no working tree.
+    _git(["clone", "--filter=blob:none", "--depth", "1", "--single-branch",
+          "--branch", ref, "--no-checkout", REPO_URL, str(root)])
+    # Restrict the working set to non-binary files (skip art/textures/binaries) ...
+    _git(["-C", str(root), "sparse-checkout", "set", "--no-cone", *_SPARSE_PATTERNS])
+    # ... then check out, which fetches blobs only for the included paths.
+    _git(["-C", str(root), "checkout"])
     if not wrapper.exists():
         sys.exit(f"clone did not produce {wrapper}")
     sha = _run(["git", "-C", str(root), "rev-parse", "HEAD"]).stdout.strip()

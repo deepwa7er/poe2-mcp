@@ -15,9 +15,9 @@ machine — the checkout persists in `~/.cache/poe2-mcp/pob` (override with `POB
    install it (`sudo dnf install luajit`, `brew install luajit`, or `apt install luajit`)
    and stop — the engine cannot run without it.
 
-2. **Run the setup** from the repo root. It clones PoB2 (~574 MB) and then self-tests by
-   booting headless and computing a build, so it takes a few minutes. Run it in the
-   background and monitor its output rather than blocking:
+2. **Run the setup** from the repo root. It does a slim clone of PoB2 (~50 MB — code and
+   data only, no textures) and self-tests by booting headless and computing a build,
+   taking only a few seconds. Run it and report the result:
 
    ```
    uv run python scripts/setup_pob.py --selftest
@@ -36,8 +36,8 @@ machine — the checkout persists in `~/.cache/poe2-mcp/pob` (override with `POB
 
 - **Idempotent.** Re-running skips the clone if PoB is already present. Pass `--force`
   to re-clone from scratch.
-- **Pinning.** `POB_REF` selects the PoB release (default a recent tag). If a build's
-  tree version differs from the bundled data, recompute results carry a `note`; pin
-  `POB_REF` to a release matching the league to clear it.
+- **Ref.** `POB_REF` selects the git ref (default `dev`, which has the PoE2 data — the
+  `v2.x` release tags are legacy PoE1 data, so don't use those). If a build's tree
+  version differs from the bundled data, recompute results carry a `note`.
 - This is the only manual step; everything else (gear, gem data, config tools) works
   with no setup.
