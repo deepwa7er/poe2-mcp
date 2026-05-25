@@ -5,6 +5,8 @@ Tools:
   load_build      — decode a PoB export code or pobb.in URL
   get_stats       — computed character stats (life, mana, damage, resists, …)
   get_config      — the PoB <Config> assumptions behind those stats (enemy setup, conditions)
+  recompute_stats — re-run PoB headless under custom config overrides (real buffed DPS)
+  compare_dps     — unbuffed vs a combat preset, with the delta
   get_passives    — allocated passive nodes (with names/stats if tree data is loaded)
   get_items       — equipped items and their mods
   get_skills      — skill socket groups and gem links
@@ -32,6 +34,7 @@ from .pob import decode_build_code, parse_build_xml, Build
 from .pob.models import Item, SkillGem, SocketGroup, Stat, PassiveNode
 from .tree import PassiveTree, TreeNode, load_default_tree
 from .skills import GemData, load_default_gem_data
+from .pob_engine import get_engine, PobEngineError, PRESETS
 from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
 from .community import poeninja
 
@@ -39,6 +42,7 @@ mcp = FastMCP("poe2-mcp")
 
 # Module-level state — single-user personal tool, single process
 _build: Build | None = None
+_build_xml: str | None = None  # raw XML of the loaded build, for the headless engine
 _tree: PassiveTree | None = load_default_tree()
 _gems: GemData | None = load_default_gem_data()
 
@@ -72,10 +76,11 @@ def load_build(code: str) -> str:
 
 def _load_build_from_xml(xml: str) -> Build:
     """Parse XML into the module-level build, resolving passive names if tree data is present."""
-    global _build, _tree
+    global _build, _build_xml, _tree
     if _tree is None:
         _tree = load_default_tree()
     _build = parse_build_xml(xml)
+    _build_xml = xml  # retained so the headless engine can recompute this build
     if _tree is not None:
         _build.passive_nodes = _tree.resolve_ids(_build.allocated_node_ids)
     return _build
@@ -160,6 +165,79 @@ def get_config() -> dict:
         "note": "These assumptions produced get_stats. Conditions not in "
                 "active_conditions are treated as inactive (e.g. charges count only "
                 "if a corresponding condition/input is set).",
+    }
+
+
+def _engine_unavailable_msg() -> dict:
+    eng = get_engine()
+    return {
+        "available": False,
+        "error": f"Headless PoB engine not set up (looked in {eng.root}).",
+        "hint": "Run `uv run python scripts/setup_pob.py --selftest`, "
+                "or set POB_FORK_PATH to a PoB2 checkout.",
+    }
+
+
+@mcp.tool()
+def recompute_stats(config_overrides: dict | None = None, stats: list[str] | None = None) -> dict:
+    """
+    Recompute the loaded build's stats with Path of Building, under chosen assumptions.
+
+    Unlike get_stats (which reports the export's saved, often-unbuffed numbers), this
+    runs PoB's calc engine headlessly so you can override config and see the result —
+    e.g. config_overrides={"usePowerCharges": true, "conditionEnemyShocked": true} to
+    get real combat DPS for a charge/shock build. Override keys are PoB <Config> input
+    names (see get_config); unknown keys are ignored by PoB. stats defaults to a useful
+    set (TotalDPS, Life, …); pass a list to request specific ones.
+
+    Requires a loaded build and the headless engine (scripts/setup_pob.py). If the
+    engine isn't set up, returns {available: false} with setup instructions rather than
+    failing — every other tool keeps working.
+    """
+    _require_build()
+    engine = get_engine()
+    if not engine.available():
+        return _engine_unavailable_msg()
+    try:
+        out = engine.recompute(_build_xml, overrides=config_overrides or {}, stats=stats)
+    except PobEngineError as e:
+        return {"available": True, "error": str(e)}
+    return {"available": True, "overrides": config_overrides or {}, "stats": out}
+
+
+@mcp.tool()
+def compare_dps(preset: str = "combat") -> dict:
+    """
+    Compare the loaded build's DPS unbuffed vs. under a named combat preset.
+
+    Recomputes TotalDPS with the build's saved config and again with the preset's
+    overrides applied, returning both and the delta — the quick answer to "what's my
+    real DPS once charges/shock are up?".
+
+    Presets: unbuffed, charges, shocked, combat (see pob_engine/presets.py). For custom
+    assumptions use recompute_stats. Requires a loaded build and the headless engine;
+    returns {available: false} with setup instructions if the engine isn't configured.
+    """
+    _require_build()
+    if preset not in PRESETS:
+        return {"error": f"unknown preset {preset!r}", "available_presets": sorted(PRESETS)}
+    engine = get_engine()
+    if not engine.available():
+        return _engine_unavailable_msg()
+    try:
+        base = engine.recompute(_build_xml, stats=["TotalDPS"])
+        buffed = engine.recompute(_build_xml, overrides=PRESETS[preset], stats=["TotalDPS"])
+    except PobEngineError as e:
+        return {"available": True, "error": str(e)}
+    b = base.get("TotalDPS") or 0
+    s = buffed.get("TotalDPS") or 0
+    return {
+        "available": True,
+        "preset": preset,
+        "overrides": PRESETS[preset],
+        "baseline_dps": b,
+        "preset_dps": s,
+        "delta_pct": round((s / b - 1) * 100, 1) if b else None,
     }
 
 
