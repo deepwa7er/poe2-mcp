@@ -56,6 +56,8 @@ claude mcp add poe2 -- uv --directory /path/to/poe2-mcp run poe2-mcp
 | `path_to_node` | Shortest sequence of nodes to allocate to reach a target node, with point cost |
 | `get_point_budget` | Passive/ascendancy point usage summary for the loaded build |
 | `analyze_defenses` | Defensive sanity checks — uncapped/negative resistances, health pool |
+| `list_mods_for_base` | The affix pool that can roll on a base — prefix/suffix, tiers, item level, spawn weight |
+| `craft_advisor` | Build-aware advice for adding a stat to an item — open slots, tiers, risk-rated methods |
 | `get_meta_overview` | Current build meta (ascendancy popularity) for a league, from poe.ninja |
 | `list_top_builds` | Top community builds on the poe.ninja ladder |
 | `load_community_build` | Load a poe.ninja ladder build by account + character name |
@@ -122,7 +124,31 @@ PoB for that one.
 These tools use poe.ninja's public but **undocumented** API, so it may change without
 notice. Responses are cached briefly to stay fast and to be a polite client.
 
+### Crafting advice
+
+The export shows an item's *rolled* mods but not the *pool* behind them. `list_mods_for_base`
+and `craft_advisor` add that: which affixes can roll on a base (prefix/suffix, tiers, item
+level, weight), and — for an equipped item — whether a target stat can be added, which slots
+are free, and the lowest-risk way to do it. PoE2 crafting is largely additive and random, so
+the open-slot question is the whole point.
+
+```
+list_mods_for_base("Sapphire Ring", keyword="cold resistance")   → the cold-res tiers a ring can roll
+craft_advisor(target="cold resistance", slot="Gloves")           → can I add it to my gloves, and how?
+```
+
+`craft_advisor` ranks methods by risk (rune-in-socket, Exalt-to-open-slot with an approximate
+hit chance, essence/omen, remove-and-add, replace) and is honest about its limits — slot counts
+are inferred by classifying rolled mods, and it never invents rune/essence values that aren't in
+the data. See [docs/crafting-advisor.md](docs/crafting-advisor.md) for details.
+
 ## Tree data
+
+The passive tree data is sourced from the community-maintained [passive-skill-tree-json](https://github.com/poe-tool-dev/passive-skill-tree-json) repository, which mirrors the format published by Grinding Gear Games. The bundled `data/poe2_tree.json` can be replaced with a newer version by dropping a fresh file in the same location, or by pointing the `TREE_DATA_PATH` environment variable at an alternative path.
+
+## Crafting data
+
+The affix pool and base types are sourced from the [RePoE-fork PoE2 export](https://repoe-fork.github.io/poe2/) — static JSON extracted from the client (GGG ships no PoE2 data export, and poe2db has no data API). `scripts/build_craft_data.py` fetches and slims it to the bundled `data/poe2_crafting.json`. The pool drifts between patches; regenerate with `uv run python scripts/build_craft_data.py`, or point `CRAFT_DATA_PATH` at an alternative file.
 
 The passive tree data is sourced from the community-maintained [passive-skill-tree-json](https://github.com/poe-tool-dev/passive-skill-tree-json) repository, which mirrors the format published by Grinding Gear Games. The bundled `data/poe2_tree.json` can be replaced with a newer version by dropping a fresh file in the same location, or by pointing the `TREE_DATA_PATH` environment variable at an alternative path.
 

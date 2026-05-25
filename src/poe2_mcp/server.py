@@ -20,6 +20,8 @@ Tools:
   path_to_node    — shortest allocate-sequence from the build to a target node
   get_point_budget — passive/ascendancy point usage summary
   analyze_defenses — defensive sanity checks (resists, health pool)
+  list_mods_for_base — the affix pool that can roll on a base (tiers, weights, ilvl)
+  craft_advisor   — build-aware advice for adding a stat to an item (slots, risk-rated methods)
   get_meta_overview — poe.ninja ascendancy popularity for a league
   list_top_builds — top community builds on the poe.ninja ladder
   load_community_build — load a poe.ninja build by account + character name
@@ -38,6 +40,7 @@ from .skills import GemData, load_default_gem_data
 from .pob_engine import get_engine, PobEngineError, PRESETS
 from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
 from .community import poeninja
+from .crafting import load_default_craft_data, advise as _advise_craft
 
 mcp = FastMCP("poe2-mcp")
 
@@ -46,6 +49,7 @@ _build: Build | None = None
 _build_xml: str | None = None  # raw XML of the loaded build, for the headless engine
 _tree: PassiveTree | None = load_default_tree()
 _gems: GemData | None = load_default_gem_data()
+_craft = load_default_craft_data()
 
 
 def _require_build() -> Build:
@@ -703,6 +707,75 @@ def analyze_defenses() -> list[dict]:
     """
     build = _require_build()
     return _analyze_defenses(build)
+
+
+@mcp.tool()
+def list_mods_for_base(base: str, keyword: str | None = None, kind: str | None = None) -> dict:
+    """
+    List the explicit affixes that can roll on a given item base, grouped into tiers.
+
+    This is the raw crafting pool from the vendored RePoE PoE2 export — independent of
+    any loaded build. For each mod group it returns the prefix/suffix (gen), the base's
+    spawn weight (higher = more common), and every tier (affix name, tooltip text, and
+    the item level required to roll it).
+
+    Args:
+      base    — a base type name, e.g. "Gripped Gloves", "Sapphire Ring". (Rare/Unique
+                items expose a clean base; Magic items fold it into the name.)
+      keyword — optional case-insensitive filter on mod text/type, e.g. "cold resistance",
+                "life", "attack speed".
+      kind    — optional "prefix" or "suffix" filter.
+
+    Use craft_advisor instead when you want build-aware advice for a specific equipped
+    item (open slots, lowest-risk method). Returns {error} if crafting data is missing
+    or the base is unknown.
+    """
+    if _craft is None:
+        return {"error": "Crafting data not loaded. Generate data/poe2_crafting.json via "
+                         "scripts/build_craft_data.py, or set CRAFT_DATA_PATH."}
+    if kind is not None and kind not in ("prefix", "suffix"):
+        return {"error": f"kind must be 'prefix' or 'suffix', got {kind!r}."}
+    return _craft.mods_for_base(base, keyword=keyword, kind=kind)
+
+
+@mcp.tool()
+def craft_advisor(target: str, slot: str | None = None, base: str | None = None) -> dict:
+    """
+    Advise how to add a target stat to one item, accounting for PoE2 crafting reality.
+
+    PoE2 crafting is largely additive and random, so the hard part isn't getting a mod —
+    it's getting it without sacrificing the mods already on the item. This tool resolves
+    the item's base affix pool and reports:
+      - whether the target can roll there, and which tiers the item's level allows
+      - how many prefix/suffix slots are already used vs. open (inferred from the rolled
+        mods; an unclassifiable mod lowers confidence, which is reported)
+      - whether the target is already present (then it's a Divine-to-improve case)
+      - a ranked, risk-rated list of methods (open-slot add, rune-in-socket, essence/omen,
+        remove-and-add, replace), with an approximate Exalt-hit chance when a slot is open
+
+    Target is a stat keyword, e.g. "cold resistance", "maximum life", "attack speed".
+    Identify the item by either:
+      slot — a slot from get_items on the loaded build (e.g. "Gloves", "Ring 1"); or
+      base — a base type name directly, when no build is loaded.
+
+    Requires crafting data; slot mode requires a loaded build.
+    """
+    if _craft is None:
+        return {"error": "Crafting data not loaded. Generate data/poe2_crafting.json via "
+                         "scripts/build_craft_data.py, or set CRAFT_DATA_PATH."}
+    if slot:
+        build = _require_build()
+        q = slot.strip().lower()
+        item = (next((it for it in build.items if it.slot.lower() == q), None)
+                or next((it for it in build.items if q in it.slot.lower()), None))
+        if item is None:
+            return {"error": f"No equipped item in slot {slot!r}. Slots: "
+                             f"{[it.slot for it in build.items]}"}
+        return _advise_craft(item, target, _craft)
+    if base:
+        item = Item(slot="", rarity="Rare", name=base, base_type=base, item_level=100)
+        return _advise_craft(item, target, _craft)
+    return {"error": "Specify either slot (an item on the loaded build) or base (a base type name)."}
 
 
 @mcp.tool()
