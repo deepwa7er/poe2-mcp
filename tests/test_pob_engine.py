@@ -66,3 +66,25 @@ def test_server_compare_dps_integration():
     res = compare(preset="shocked")
     assert res["available"] is True
     assert res["preset_dps"] >= res["baseline_dps"] > 0
+
+
+@pytest.mark.skipif(not _pob_available, reason="set POB_FORK_PATH to a PoB2 checkout to run")
+def test_server_skill_selection():
+    server, list_groups = _server_tool("list_skill_groups")
+    _, recompute = _server_tool("recompute_stats")
+    server._load_build_from_xml(decode_build_code((FIXTURES / "poeninja_pob_export.txt").read_text()))
+
+    groups = list_groups()
+    assert groups["available"] is True
+    named = [g for g in groups["skills"] if g.get("skill")]
+    assert len(named) >= 2 and all("index" in g for g in groups["skills"])
+
+    # Select a specific skill group by name, and by 1-based index.
+    by_name = recompute(skill=named[0]["skill"], stats=["TotalDPS"])
+    assert by_name["available"] is True and "TotalDPS" in by_name["stats"]
+    by_index = recompute(skill=named[0]["index"], stats=["TotalDPS"])
+    assert by_index["stats"]["TotalDPS"] == by_name["stats"]["TotalDPS"]
+
+    # Unknown skill name fails gracefully.
+    bad = recompute(skill="definitely-not-a-skill")
+    assert "error" in bad and "Available" in bad["error"]

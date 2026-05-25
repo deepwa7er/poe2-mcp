@@ -85,6 +85,28 @@ function handlers.select_skill(req)
 	return {}
 end
 
+function handlers.list_skills()
+	local out = {}
+	local sgl = (build.skillsTab and build.skillsTab.socketGroupList) or {}
+	for i, sg in ipairs(sgl) do
+		local skill
+		local dsl = sg.displaySkillList
+		if dsl and #dsl > 0 then
+			local active = dsl[math.min(sg.mainActiveSkill or 1, #dsl)]
+			local ge = active and active.activeEffect and active.activeEffect.grantedEffect
+			skill = ge and ge.name
+		end
+		out[i] = {
+			index = i,
+			label = sg.label,
+			skill = skill or sg.displayLabel,
+			enabled = sg.enabled ~= false,
+			is_main = (i == build.mainSocketGroup),
+		}
+	end
+	return { skills = out }
+end
+
 function handlers.get_output(req)
 	return { output = collect(req.stats) }
 end

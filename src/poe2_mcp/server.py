@@ -10,6 +10,7 @@ Tools:
   get_passives    — allocated passive nodes (with names/stats if tree data is loaded)
   get_items       — equipped items and their mods
   get_skills      — skill socket groups and gem links
+  list_skill_groups — the build's skill groups as PoB indexes them (for the `skill` arg)
   get_skill_details — a gem's mechanics (tags, spirit reservation, charge use) from the PoB2 db
   get_spirit_reservation — the loaded build's spirit reservation breakdown
   search_passives — find allocated passives matching a keyword
@@ -178,8 +179,47 @@ def _engine_unavailable_msg() -> dict:
     }
 
 
+def _resolve_skill_group(engine, skill) -> tuple[int | None, str | None]:
+    """Resolve a `skill` argument (1-based group index, or skill name) to a group
+    index. Returns (index, None) or (None, error_message)."""
+    if skill is None:
+        return None, None
+    if isinstance(skill, int):
+        return skill, None
+    groups = engine.skill_groups(_build_xml)
+    q = str(skill).strip().lower()
+    matches = ([g for g in groups if (g.get("skill") or "").lower() == q]
+               or [g for g in groups if q in (g.get("skill") or "").lower()])
+    if not matches:
+        return None, f"no skill group matches {skill!r}. Available: {[g.get('skill') for g in groups]}"
+    return matches[0]["index"], None
+
+
 @mcp.tool()
-def recompute_stats(config_overrides: dict | None = None, stats: list[str] | None = None) -> dict:
+def list_skill_groups() -> dict:
+    """
+    List the loaded build's skill groups as Path of Building indexes them.
+
+    Each entry has index (1-based), skill (active skill name), label, enabled, and
+    is_main. Pass an index or name as the `skill` argument to recompute_stats /
+    compare_dps to target a specific skill (e.g. Falling Thunder vs Storm Wave).
+
+    Requires a loaded build and the headless engine; returns {available: false} with
+    setup instructions otherwise.
+    """
+    _require_build()
+    engine = get_engine()
+    if not engine.available():
+        return _engine_unavailable_msg()
+    try:
+        return {"available": True, "skills": engine.skill_groups(_build_xml)}
+    except PobEngineError as e:
+        return {"available": True, "error": str(e)}
+
+
+@mcp.tool()
+def recompute_stats(config_overrides: dict | None = None, stats: list[str] | None = None,
+                    skill: int | str | None = None) -> dict:
     """
     Recompute the loaded build's stats with Path of Building, under chosen assumptions.
 
@@ -190,6 +230,9 @@ def recompute_stats(config_overrides: dict | None = None, stats: list[str] | Non
     names (see get_config); unknown keys are ignored by PoB. stats defaults to a useful
     set (TotalDPS, Life, …); pass a list to request specific ones.
 
+    skill selects which skill group's DPS to compute — a 1-based index or a skill name
+    (e.g. "Falling Thunder"); see list_skill_groups. Defaults to the build's main skill.
+
     Requires a loaded build and the headless engine (scripts/setup_pob.py). If the
     engine isn't set up, returns {available: false} with setup instructions rather than
     failing — every other tool keeps working.
@@ -198,11 +241,14 @@ def recompute_stats(config_overrides: dict | None = None, stats: list[str] | Non
     engine = get_engine()
     if not engine.available():
         return _engine_unavailable_msg()
+    group, err = _resolve_skill_group(engine, skill)
+    if err:
+        return {"available": True, "error": err}
     try:
-        out = engine.recompute(_build_xml, overrides=config_overrides or {}, stats=stats)
+        out = engine.recompute(_build_xml, overrides=config_overrides or {}, stats=stats, skill_group=group)
     except PobEngineError as e:
         return {"available": True, "error": str(e)}
-    res = {"available": True, "overrides": config_overrides or {}, "stats": out}
+    res = {"available": True, "skill": skill, "overrides": config_overrides or {}, "stats": out}
     note = engine.version_note(_build_xml)
     if note:
         res["note"] = note
@@ -210,7 +256,7 @@ def recompute_stats(config_overrides: dict | None = None, stats: list[str] | Non
 
 
 @mcp.tool()
-def compare_dps(preset: str = "combat") -> dict:
+def compare_dps(preset: str = "combat", skill: int | str | None = None) -> dict:
     """
     Compare the loaded build's DPS unbuffed vs. under a named combat preset.
 
@@ -218,9 +264,10 @@ def compare_dps(preset: str = "combat") -> dict:
     overrides applied, returning both and the delta — the quick answer to "what's my
     real DPS once charges/shock are up?".
 
-    Presets: unbuffed, charges, shocked, combat (see pob_engine/presets.py). For custom
-    assumptions use recompute_stats. Requires a loaded build and the headless engine;
-    returns {available: false} with setup instructions if the engine isn't configured.
+    Presets: unbuffed, charges, shocked, combat (see pob_engine/presets.py). skill picks
+    the skill group (1-based index or name, see list_skill_groups); defaults to the main
+    skill. For custom assumptions use recompute_stats. Requires a loaded build and the
+    headless engine; returns {available: false} with setup instructions otherwise.
     """
     _require_build()
     if preset not in PRESETS:
@@ -228,9 +275,12 @@ def compare_dps(preset: str = "combat") -> dict:
     engine = get_engine()
     if not engine.available():
         return _engine_unavailable_msg()
+    group, err = _resolve_skill_group(engine, skill)
+    if err:
+        return {"available": True, "error": err}
     try:
-        base = engine.recompute(_build_xml, stats=["TotalDPS"])
-        buffed = engine.recompute(_build_xml, overrides=PRESETS[preset], stats=["TotalDPS"])
+        base = engine.recompute(_build_xml, stats=["TotalDPS"], skill_group=group)
+        buffed = engine.recompute(_build_xml, overrides=PRESETS[preset], stats=["TotalDPS"], skill_group=group)
     except PobEngineError as e:
         return {"available": True, "error": str(e)}
     b = base.get("TotalDPS") or 0
@@ -238,6 +288,7 @@ def compare_dps(preset: str = "combat") -> dict:
     res = {
         "available": True,
         "preset": preset,
+        "skill": skill,
         "overrides": PRESETS[preset],
         "baseline_dps": b,
         "preset_dps": s,

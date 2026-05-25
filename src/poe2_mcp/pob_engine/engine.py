@@ -43,6 +43,7 @@ class PobEngine:
         self._id = 0
         self._cache: dict[tuple, dict] = {}      # (xml, overrides, stats, group) -> output
         self._versions: dict[int, dict] = {}     # hash(xml) -> {tree_version, pob_tree_version}
+        self._skills: dict[int, list] = {}       # hash(xml) -> socket-group list
         atexit.register(self.close)
 
     # -- lifecycle ---------------------------------------------------------
@@ -170,6 +171,16 @@ class PobEngine:
         if len(self._cache) > 64:                 # simple bound, FIFO eviction
             self._cache.pop(next(iter(self._cache)))
         return out
+
+    def skill_groups(self, xml: str) -> list[dict]:
+        """Return the build's socket groups as PoB indexes them: each has index
+        (1-based, for skill_group / select_skill), skill (active skill name), label,
+        enabled, is_main. Cached per build."""
+        h = hash(xml)
+        if h not in self._skills:
+            self.load(xml)
+            self._skills[h] = self._request(cmd="list_skills").get("skills", [])
+        return self._skills[h]
 
     def version_note(self, xml: str) -> str | None:
         """A caveat string if the build's tree version differs from PoB's bundled

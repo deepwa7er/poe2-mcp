@@ -79,11 +79,14 @@ uv run python scripts/setup_pob.py --selftest
 
 Then, with a build loaded, the MCP tools recompute against it:
 
-- `recompute_stats(config_overrides, stats)` — run PoB under arbitrary `<Config>`
+- `list_skill_groups()` — the build's skill groups as PoB indexes them (index, skill
+  name, is_main); use it to find the `skill` argument below.
+- `recompute_stats(config_overrides, stats, skill)` — run PoB under arbitrary `<Config>`
   overrides (keys from `get_config`), e.g. `{"usePowerCharges": true,
-  "conditionEnemyShocked": true}`.
-- `compare_dps(preset)` — `unbuffed` vs a preset (`charges` / `shocked` / `combat`),
-  returning both DPS values and the delta.
+  "conditionEnemyShocked": true}`. `skill` (1-based index or name, e.g. "Falling
+  Thunder") targets a specific skill group; defaults to the build's main skill.
+- `compare_dps(preset, skill)` — `unbuffed` vs a preset (`charges` / `shocked` /
+  `combat`), returning both DPS values and the delta, for the chosen skill.
 
 If `POB_FORK_PATH` is unset/missing, these tools return `{available: false}` with
 setup instructions; the rest of the server is unaffected.
