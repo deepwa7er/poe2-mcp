@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__poe2__get_skill_details",
+      "mcp__poe2__get_skills",
+      "mcp__poe2__list_skill_groups",
+      "mcp__poe2__get_passives",
+      "mcp__poe2__search_passives",
+      "mcp__poe2__search_tree",
+      "mcp__poe2__get_node",
+      "mcp__poe2__get_reachable_nodes",
+      "mcp__poe2__get_point_budget",
+      "mcp__poe2__path_to_node",
+      "mcp__poe2__get_stats",
+      "mcp__poe2__get_items",
+      "mcp__poe2__get_config",
+      "mcp__poe2__get_spirit_reservation",
+      "mcp__poe2__get_meta_overview",
+      "mcp__poe2__list_top_builds",
+      "mcp__poe2__list_my_characters",
+      "mcp__poe2__load_my_character",
+      "mcp__poe2__load_build",
+      "mcp__poe2__load_community_build",
+      "mcp__poe2__compare_dps",
+      "mcp__poe2__analyze_defenses",
+      "mcp__poe2__recompute_stats",
+      "mcp__poe2__list_mods_for_base",
+      "mcp__poe2__craft_advisor"
+    ]
+  }
+}
