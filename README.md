@@ -58,6 +58,7 @@ claude mcp add poe2 -- uv --directory /path/to/poe2-mcp run poe2-mcp
 | `analyze_defenses` | Defensive sanity checks — uncapped/negative resistances, health pool |
 | `list_mods_for_base` | The affix pool that can roll on a base — prefix/suffix, tiers, item level, spawn weight |
 | `craft_advisor` | Build-aware advice for adding a stat to an item — open slots, tiers, risk-rated methods |
+| `generate_vendor_regex` | Build-aware vendor-search regex for one slot, packed under a 50-char budget |
 | `get_meta_overview` | Current build meta (ascendancy popularity) for a league, from poe.ninja |
 | `list_top_builds` | Top community builds on the poe.ninja ladder |
 | `load_community_build` | Load a poe.ninja ladder build by account + character name |
@@ -141,6 +142,23 @@ craft_advisor(target="cold resistance", slot="Gloves")           → can I add i
 hit chance, essence/omen, remove-and-add, replace) and is honest about its limits — slot counts
 are inferred by classifying rolled mods, and it never invents rune/essence values that aren't in
 the data. See [docs/crafting-advisor.md](docs/crafting-advisor.md) for details.
+
+### Vendor regex
+
+`generate_vendor_regex` turns the loaded build into a short alternation regex you can paste into
+a vendor's search bar. Uncapped resistances, life, slot intent (movement on boots), and the active
+skill's damage-type / speed scaling drive what gets included; the result is packed under a 50-char
+budget (the vendor bar limit). Capped resistances are dropped automatically — fix them in-game and
+the next call's regex shrinks.
+
+```
+generate_vendor_regex(slot="Gloves")    → {"regex": "Life|Fire Dam|tta.*Sp", ...}
+generate_vendor_regex(slot="Boots")     → {"regex": "Life|Move|Res", ...}
+generate_vendor_regex(slot="Boots", include=["minion"])  → forces a key past the slot allowlist
+```
+
+Each call also returns what was included, what was dropped (and why), and a per-entry reason so
+you can see which fragment came from which need.
 
 ## Tree data
 

@@ -22,6 +22,7 @@ Tools:
   analyze_defenses — defensive sanity checks (resists, health pool)
   list_mods_for_base — the affix pool that can roll on a base (tiers, weights, ilvl)
   craft_advisor   — build-aware advice for adding a stat to an item (slots, risk-rated methods)
+  generate_vendor_regex — build-aware vendor-search regex for one slot (under a char budget)
   get_meta_overview — poe.ninja ascendancy popularity for a league
   list_top_builds — top community builds on the poe.ninja ladder
   load_community_build — load a poe.ninja build by account + character name
@@ -41,6 +42,12 @@ from .pob_engine import get_engine, PobEngineError, PRESETS
 from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
 from .community import poeninja
 from .crafting import load_default_craft_data, advise as _advise_craft
+from .vendor_regex import (
+    FRAGMENTS as _VENDOR_FRAGMENTS,
+    build_regex as _vendor_build_regex,
+    derive_priorities as _vendor_derive,
+    slot_key as _vendor_slot_key,
+)
 
 mcp = FastMCP("poe2-mcp")
 
@@ -776,6 +783,89 @@ def craft_advisor(target: str, slot: str | None = None, base: str | None = None)
         item = Item(slot="", rarity="Rare", name=base, base_type=base, item_level=100)
         return _advise_craft(item, target, _craft)
     return {"error": "Specify either slot (an item on the loaded build) or base (a base type name)."}
+
+
+@mcp.tool()
+def generate_vendor_regex(
+    slot: str,
+    budget: int = 50,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
+) -> dict:
+    """
+    Generate a build-aware vendor-search regex for one item slot.
+
+    PoE2's vendor search bar matches case-insensitively against the displayed text
+    (item name, base, mod lines). This tool derives what mods the loaded build
+    actually wants on `slot` — life is always-on, only uncapped resists are
+    included (capped ones are dropped), damage-type and speed fragments come from
+    the active skill's tags, and slot intent adds movement on boots — then packs
+    those needs as a `|`-joined alternation under `budget` characters (default 50,
+    the search-bar limit).
+
+    Args:
+      slot    — an item slot ("Body Armour", "Helmet", "Gloves", "Boots", "Belt",
+                "Amulet", "Ring", "Weapon", "Shield", "Focus", "Quiver"). Trailing
+                "1"/"2" is tolerated ("Ring 2", "Weapon 1").
+      budget  — character cap on the regex (default 50). Low-weight fragments are
+                dropped first when the budget is tight.
+      include — extra fragment keys to force in at high priority (bypasses the
+                slot allowlist; e.g. ["minion"] to force minion on boots).
+      exclude — fragment keys to drop after derivation (e.g. ["all_attrs"]).
+
+    Returns the regex, what's in/out, the char count, and per-entry reasoning so
+    the user can see why each fragment was chosen. Requires a loaded build for
+    derivation; the gem database (skills) sharpens damage-type detection but is
+    not strictly required.
+
+    Available fragment keys (for include/exclude): {keys}.
+    """
+    build = _require_build()
+    priorities = _vendor_derive(
+        build, slot, gems=_gems, include=include, exclude=exclude,
+    )
+    regex, selected, dropped = _vendor_build_regex(priorities, budget=budget)
+    sk = _vendor_slot_key(slot)
+    return {
+        "slot": slot,
+        "slot_key": sk,
+        "regex": regex,
+        "char_count": len(regex),
+        "budget": budget,
+        "included": [
+            {
+                "key": s.priority.key,
+                "label": s.priority.label,
+                "fragment": s.fragment,
+                "weight": s.priority.weight,
+                "reason": s.priority.reason,
+            }
+            for s in selected
+        ],
+        "dropped": [
+            {
+                "key": d.priority.key,
+                "label": d.priority.label,
+                "weight": d.priority.weight,
+                "reason": d.reason,
+                "derivation_reason": d.priority.reason,
+            }
+            for d in dropped
+        ],
+        "notes": [n for n in [
+            "Vendor search matches the displayed text (name + base + mod lines); "
+            "fragments are short substrings of that text, joined by '|'.",
+            "Capped resistances are dropped before packing — fix that in-game and "
+            "the regex shrinks automatically next call.",
+            ("Damage-type detection needs the gem database; without it, the regex "
+             "leans purely defensive.") if _gems is None else None,
+        ] if n],
+    }
+
+
+generate_vendor_regex.__doc__ = generate_vendor_regex.__doc__.format(  # type: ignore[union-attr]
+    keys=", ".join(sorted(_VENDOR_FRAGMENTS))
+)
 
 
 @mcp.tool()

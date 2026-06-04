@@ -1,7 +1,7 @@
 {
 "meta": {
 "source": "PathOfBuildingCommunity/PathOfBuilding-PoE2@dev/src/Data/Skills",
-"generated": "2026-05-24",
+"generated": "2026-05-29",
 "files": [
 "act_dex.lua",
 "act_int.lua",
@@ -11,7 +11,7 @@
 "sup_int.lua",
 "sup_str.lua"
 ],
-"count": 1021
+"count": 997
 },
 "skills": {
 "AcidicConcoctionPlayer": {
@@ -1024,29 +1024,6 @@
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
-},
-"ConductivityPlayer": {
-"name": "Conductivity",
-"base_type": "Conductivity",
-"description": "Curse all targets in an area after a short delay, lowering their Lightning Resistance.",
-"skill_types": [
-"Spell",
-"Area",
-"Duration",
-"Trappable",
-"Totemable",
-"Mineable",
-"Multicastable",
-"Triggerable",
-"Lightning",
-"Cascadable",
-"AppliesCurse",
-"Unleashable",
-"AreaSpell",
-"UsableWhileMoving"
-],
-"spirit_reservation": 0,
-"cast_time": 0.7
 },
 "ContagionPlayer": {
 "name": "Contagion",
@@ -2188,29 +2165,6 @@
 "spirit_reservation": 0,
 "cast_time": 0.25
 },
-"FlammabilityPlayer": {
-"name": "Flammability",
-"base_type": "Flammability",
-"description": "Curse all targets in an area after a short delay, lowering their Fire Resistance.",
-"skill_types": [
-"Spell",
-"Area",
-"Duration",
-"Trappable",
-"Totemable",
-"Mineable",
-"Multicastable",
-"Triggerable",
-"Fire",
-"Cascadable",
-"AppliesCurse",
-"Unleashable",
-"AreaSpell",
-"UsableWhileMoving"
-],
-"spirit_reservation": 0,
-"cast_time": 0.7
-},
 "FlashGrenadePlayer": {
 "name": "Flash Grenade",
 "base_type": "Flash Grenade",
@@ -3148,29 +3102,6 @@
 ],
 "spirit_reservation": 0,
 "cast_time": 1.0
-},
-"HypothermiaPlayer": {
-"name": "Hypothermia",
-"base_type": "Hypothermia",
-"description": "Curse all targets in an area after a short delay, lowering their Cold Resistance.",
-"skill_types": [
-"Spell",
-"Area",
-"Duration",
-"Trappable",
-"Totemable",
-"Mineable",
-"Multicastable",
-"Triggerable",
-"Cold",
-"Cascadable",
-"AppliesCurse",
-"Unleashable",
-"AreaSpell",
-"UsableWhileMoving"
-],
-"spirit_reservation": 0,
-"cast_time": 0.7
 },
 "IceFragmentsPlayer": {
 "name": "Ice Fragments",
@@ -4398,6 +4329,21 @@
 "AttackInPlace"
 ],
 "spirit_reservation": 60,
+"cast_time": 0.0
+},
+"MetaMirageDeadeyePlayer": {
+"name": "Mirage Deadeye",
+"base_type": "Mirage Deadeye",
+"description": "While active, firing a ranged Projectile Attack will create a Mirage that uses socketed ranged Attacks for a short duration, then vanish.",
+"skill_types": [
+"Buff",
+"Meta",
+"HasReservation",
+"OngoingSkill",
+"Persistent",
+"AttackInPlace"
+],
+"spirit_reservation": 0,
 "cast_time": 0.0
 },
 "MetaMortarCannonPlayer": {
@@ -7680,30 +7626,6 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportDazedBreakPlayer": {
-"name": "Break Posture",
-"base_type": "",
-"description": "Supports Attacks, causing them to Daze Enemies when they fully Break Armour.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportDazingCryPlayer": {
-"name": "Dazing Cry",
-"base_type": "",
-"description": "Supports Warcries, causing them to Daze Enemies on use.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportDazzlePlayer": {
-"name": "Dazzle",
-"base_type": "",
-"description": "Supports Attack Skills. Supported Skills always hit Dazed Enemies, but Consume Daze on Hit, and cannot themselves inflict Daze.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportDeadlyCurrentPlayer": {
 "name": "Coursing Current",
 "base_type": "",
@@ -7828,22 +7750,6 @@
 "name": "Derange",
 "base_type": "",
 "description": "Supports Skills which you use yourself which can deal damage. Supported Skills gain an Energy Shield cost equal to your Intelligence, while also dealing more non-Ailment Damage over time based off of your Intelligence. Cannot support Channelling Skills.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportDesperationPlayer": {
-"name": "Desperation",
-"base_type": "",
-"description": "Supports Melee Attack Skills you use yourself. Insufficient Mana doesn't prevent Supported Skills from being used while Surrounded.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportDevastatePlayer": {
-"name": "Devastate",
-"base_type": "",
-"description": "Supports any skill that Hits enemies, causing them to apply Broken Armour to enemies when causing a Heavy Stun to enemies.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -8032,34 +7938,10 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportEmpoweredDamagePlayer": {
-"name": "Premeditation",
-"base_type": "",
-"description": "Supports skills that can Empower skills other than themselves, causing skills they Empower to deal more damage.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportEncroachingGroundPlayer": {
 "name": "Encroaching Ground",
 "base_type": "",
 "description": "Supports Skills that create Ground Surfaces, causing those Surfaces to grow over time, up to a limit.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportEnduranceChargeOnArmourBreak": {
-"name": "Break Endurance",
-"base_type": "",
-"description": "Supports any skill that Hits enemies, giving it a chance to gain an Endurance Charge when it Fully Breaks an enemy's Armour.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportEnergyBarrierPlayer": {
-"name": "Energy Barrier",
-"base_type": "",
-"description": "Supports any skill that you can use, causing Energy Shield recharge to begin immediately if you are Stunned while using it.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -8140,14 +8022,6 @@
 "name": "Excise",
 "base_type": "",
 "description": "Supports any damaging Skill that you use yourself, granting it significantly higher chance to Critically Hit, but causing it to gain a long cooldown. Cannot support Skills which already have a cooldown.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportExcoriatePlayer": {
-"name": "Excoriate",
-"base_type": "",
-"description": "Supports Melee Attack Skills. Supported Skills deal more Melee Damage for each Elemental Ailment on Enemies they hit, but cannot themselves inflict Elemental Ailments.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -8352,14 +8226,6 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportFirstBloodPlayer": {
-"name": "First Blood",
-"base_type": "",
-"description": "Supports Attacks. Supported Skills are far more likely to inflict Bleeding on Hitting full Life Enemies.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportFlamePillarPlayer": {
 "name": "Flame Pillar",
 "base_type": "",
@@ -8388,14 +8254,6 @@
 "name": "Harmonic Remnants II",
 "base_type": "",
 "description": "Supports Skills which create Remnants, allowing those Remnants to be collected from further away, with a chance to create an additional Remnant.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportFlowPlayer": {
-"name": "Flow",
-"base_type": "",
-"description": "Supports Skills which require Combo to use. Supported Skills lose their Combo stacks after a longer delay spent not gaining any Combo.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -8640,26 +8498,10 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportHinderPlayer": {
-"name": "Hinder",
-"base_type": "",
-"description": "Supports Spells that deal non-Ailment Chaos damage over time, causing damage over time they inflict to also Hinder enemies. Does not Support Skills used by Minions.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportHitAndRunPlayer": {
 "name": "Hit and Run",
 "base_type": "",
 "description": "Supports Attack Skills you use yourself which do not already have some Condition for use. Supported Skills can only be used after you have moved a certain distance, but have massively increased Skill Speed. Cannot support Skills which have a Cooldown or that are Triggered, and does not modify skills used by Minions.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportHobblePlayer": {
-"name": "Hobble",
-"base_type": "",
-"description": "Supports Skills that Hit Enemies, causing those Hits to Hobble Bleeding Enemies based on a portion of Physical Damage dealt.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -8988,14 +8830,6 @@
 "name": "Lasting Shock",
 "base_type": "",
 "description": "Supports any skill that Hits enemies or inflicts Shock, causing its Shocks to be inflicted less often but last longer.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportLeveragePlayer": {
-"name": "Leverage",
-"base_type": "",
-"description": "Supports Skills which Hit Enemies. Supported Skills gain increased chance to Critically Hit against Immobilised Enemies.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -9392,6 +9226,14 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
+"SupportMirageDeadeyePlayer": {
+"name": "SupportMirageDeadeyePlayer",
+"base_type": "",
+"description": "",
+"skill_types": [],
+"spirit_reservation": 0,
+"cast_time": null
+},
 "SupportMobilityPlayer": {
 "name": "Mobility",
 "base_type": "",
@@ -9505,7 +9347,7 @@
 "cast_time": null
 },
 "SupportOisinsOathPlayer": {
-"name": "Oisín's Oath",
+"name": "Oisin's Oath",
 "base_type": "",
 "description": "Supports Skills which Hit enemies, causing their Mana Leech to recover based on Elemental damage instead of Physical damage.",
 "skill_types": [],
@@ -9516,14 +9358,6 @@
 "name": "Opening Move",
 "base_type": "",
 "description": "Supports Travel Skills which Hit enemies. Hits with Supported Skills against enemies on full life will Daze.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportOutmaneuverPlayer": {
-"name": "Outmaneuver",
-"base_type": "",
-"description": "Supports Skills you use yourself which can cause Damaging Hits. Supported Skills Break Armour against Parried Enemies.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -9720,14 +9554,6 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportPotentialPlayer": {
-"name": "Potential",
-"base_type": "",
-"description": "Supports Skills that you use yourself. Supported Skills will consume a Power Charge on use if possible, and will be much more likely to Critically Hit if they do. Supported Skills cannot generate Power Charges.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportPracticalMagicPlayer": {
 "name": "Practical Magic I",
 "base_type": "",
@@ -9916,14 +9742,6 @@
 "name": "Rakiata's Flow",
 "base_type": "",
 "description": "Supports Skills that can cause Damaging Hits, causing those Hits to treat Enemy Elemental Resistances as inverted.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportRallyPlayer": {
-"name": "Rally",
-"base_type": "",
-"description": "Supports Melee Attacks you use yourself. Supported Skills Consume all Endurance Charge on use, causing you to restore a percentage of your maximum Life for each Charge Consumed.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -10128,14 +9946,6 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportRimePlayer": {
-"name": "Rime",
-"base_type": "",
-"description": "Supports Skills which create Ground Surfaces, causing Enemies Chilled by those Surfaces to be more easily Frozen, but at the cost of some Chill magnitude.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportRipPlayer": {
 "name": "Rip",
 "base_type": "",
@@ -10220,14 +10030,6 @@
 "name": "Second Wind II",
 "base_type": "",
 "description": "Supports Skills which have a cooldown, giving them extra uses of that cooldown. Cannot support Meta, instant, or Triggered Skills, and cannot modify the Skills of Minions.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportSeeRedPlayer": {
-"name": "See Red",
-"base_type": "",
-"description": "Supports Attack Skills. Bleeding inflicted with Supported Skills lasts significantly longer, but enemies you inflict Bleeding onto with Supported Skills will move and Attack faster.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -10600,14 +10402,6 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportTremorsPlayer": {
-"name": "Tremors",
-"base_type": "",
-"description": "Supports Slam Skills you use yourself. Supported Skills gain multiple independent chances to cause Aftershocks, but deal less Damage.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportTriggeredAnnihilationPlayer": {
 "name": "Annihilation",
 "base_type": "",
@@ -10638,14 +10432,6 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportTumultPlayer": {
-"name": "Tumult",
-"base_type": "",
-"description": "Supports Skills you use yourself which can cause Damaging Hits. Supported Skills consume a Frenzy Charge on use to powerfully Break Armour.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportUhtredAuguryPlayer": {
 "name": "Uhtred's Augury",
 "base_type": "",
@@ -10666,22 +10452,6 @@
 "name": "Uhtred's Omen",
 "base_type": "",
 "description": "Supports Skills which can gain levels, granting them many additional levels provided exactly one other support is used with the supported Skill. Does not support skills which do not have levels.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportUnabatingPlayer": {
-"name": "Unabating",
-"base_type": "",
-"description": "Supports Attack Skills you use yourself. While using Supported Skills, you gain increased Armour, with the increase scaling higher the longer the Attack time of the supported Skill. Cannot Support Channelling Skills.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportUnbendingPlayer": {
-"name": "Unbending",
-"base_type": "",
-"description": "Supports Spell Skills you use yourself. While using Supported Skills, a percentage of Damage taken is Recouped as Mana, with the percentage scaling higher the longer the Cast time of the Supported Skill. Cannot Support Channelling Skills.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -10710,26 +10480,10 @@
 "spirit_reservation": 0,
 "cast_time": null
 },
-"SupportUnsteadyTempoPlayer": {
-"name": "Unsteady Tempo",
-"base_type": "",
-"description": "Supports Melee Attack Skills you use yourself. Attacking with Supported Skills will cycle through various effects, with the first Attack in sequence inflicting Hobble on you. The second and third Attacks in sequence will powerfully scale chance to Critically Hit and overall damage, respectively, at which point the cycle will reset. Cannot Support Channelling Skills.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
 "SupportUntouchablePlayer": {
 "name": "Untouchable",
 "base_type": "",
 "description": "Supports Attack Skills you use yourself. While using Supported Skills, you gain increased Evasion Rating, with the increase scaling higher the longer the Attack time of the supported Skill. Cannot Support Channelling Skills.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
-},
-"SupportUnyieldingPlayer": {
-"name": "Unyielding",
-"base_type": "",
-"description": "Supports Melee Attack Skills you use yourself. While using Supported Skills, a percentage of Damage taken is Recouped as Life, with the percentage scaling higher the longer the Attack time of the Supported Skill. Cannot Support Channelling Skills.",
 "skill_types": [],
 "spirit_reservation": 0,
 "cast_time": null
@@ -10860,14 +10614,6 @@
 "description": "Supports Persistent Buff Skills, causing you to gain Life Regeneration while the Skill is active.",
 "skill_types": [],
 "spirit_reservation": 40,
-"cast_time": null
-},
-"SupportVolatilePowerPlayer": {
-"name": "Volatile Power",
-"base_type": "",
-"description": "Supports Skills which you use yourself. On using Supported Skills while they are Empowered, you gain Volatility.",
-"skill_types": [],
-"spirit_reservation": 0,
 "cast_time": null
 },
 "SupportVolatilityPlayer": {
@@ -11168,6 +10914,16 @@
 "spirit_reservation": 0,
 "cast_time": 0.5
 },
+"ThornsPlayer": {
+"name": "Thorns",
+"base_type": "",
+"description": "",
+"skill_types": [
+"Damage"
+],
+"spirit_reservation": 0,
+"cast_time": null
+},
 "ThrashingVinesPlayer": {
 "name": "Thrashing Vines",
 "base_type": "Thrashing Vines",
@@ -11410,6 +11166,42 @@
 ],
 "spirit_reservation": 30,
 "cast_time": 0.0
+},
+"TriggeredBarbsPlayer": {
+"name": "Barbs I",
+"base_type": "",
+"description": "Deal your thorns damage.",
+"skill_types": [
+"Damage",
+"SkillGrantedBySupport",
+"AttackInPlace"
+],
+"spirit_reservation": 0,
+"cast_time": null
+},
+"TriggeredBarbsPlayerThree": {
+"name": "Barbs III",
+"base_type": "",
+"description": "Deal twice your thorns damage.",
+"skill_types": [
+"Damage",
+"SkillGrantedBySupport",
+"AttackInPlace"
+],
+"spirit_reservation": 0,
+"cast_time": null
+},
+"TriggeredBarbsPlayerTwo": {
+"name": "Barbs II",
+"base_type": "",
+"description": "Deal your thorns damage.",
+"skill_types": [
+"Damage",
+"SkillGrantedBySupport",
+"AttackInPlace"
+],
+"spirit_reservation": 0,
+"cast_time": null
 },
 "TriggeredBattershoutExplosionPlayer": {
 "name": "Battershout",
@@ -12108,14 +11900,6 @@
 ],
 "spirit_reservation": 0,
 "cast_time": 0.0
-},
-"UnbreakableSupportPlayer": {
-"name": "Unbreakable",
-"base_type": "",
-"description": "Supports any skill that you can use, making you harder to Stun while using it.",
-"skill_types": [],
-"spirit_reservation": 0,
-"cast_time": null
 },
 "UnearthPlayer": {
 "name": "Unearth",
