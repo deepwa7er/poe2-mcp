@@ -75,6 +75,31 @@ class GemData:
         sid = self._by_name.get(query.lower())
         return self._enrich(sid) if sid else None
 
+    def supports_for(self, skill_types) -> list[dict]:
+        """Every socketable support gem compatible with a skill that has the given
+        skill_types, enriched. Compatibility = the support's `requires` tags
+        intersect the skill's tags (OR-semantics — a Damage-tagged spell satisfies
+        a support that requires "Damage"/"Attack"/"CrossbowAmmoSkill"), and none of
+        its `excludes_skill_types` do. Drops gems you can't socket from a vendor
+        (hidden/legacy/from_item/from_tree/cannot_be_supported)."""
+        tags = set(skill_types)
+        out: list[dict] = []
+        for sid, s in self._skills.items():
+            if not s.get("is_support"):
+                continue
+            if any(s.get(k) for k in
+                   ("hidden", "legacy", "cannot_be_supported", "from_item", "from_tree")):
+                continue
+            # `requires`/`excludes` may carry "AND"/"OR" operator tokens, not types.
+            req = [r for r in (s.get("requires") or []) if r not in ("AND", "OR")]
+            if req and not (set(req) & tags):
+                continue
+            excl = [e for e in (s.get("excludes_skill_types") or []) if e not in ("AND", "OR")]
+            if set(excl) & tags:
+                continue
+            out.append(self._enrich(sid))
+        return out
+
     def _enrich(self, skill_id: str) -> dict:
         s = dict(self._skills[skill_id])
         s["skill_id"] = skill_id

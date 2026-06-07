@@ -12,6 +12,7 @@ Tools:
   get_skills      — skill socket groups and gem links
   list_skill_groups — the build's skill groups as PoB indexes them (for the `skill` arg)
   get_skill_details — a gem's mechanics (tags, spirit reservation, charge use) from the PoB2 db
+  recommend_supports — compatible support gems for a skill, bucketed (pen/more/conditional)
   get_spirit_reservation — the loaded build's spirit reservation breakdown
   search_passives — find allocated passives matching a keyword
   search_tree     — find any node in the full passive tree (allocated or not)
@@ -436,10 +437,14 @@ def get_skill_details(query: str) -> dict:
     get_skills ("FallingThunderPlayer"). A tier numeral is optional — "Minion Pact"
     resolves to "Minion Pact I". Returns the gem's name, tags (skill_types), base
     Spirit reservation, mechanic description, and:
-      - stats            — the gem's flat numeric effects as {id, value}, e.g.
+      - stats            — the gem's flat effects as {id, value}, e.g.
                            {"id": "base_reduce_enemy_fire_resistance_%", "value": 30}.
                            THIS is a support's real strength — read it instead of
-                           inferring from the gem's level (see get_skills).
+                           inferring from the gem's level (see get_skills). value may
+                           be a boolean: a flag-stat like {"id":
+                           "hits_ignore_enemy_fire_resistance", "value": true} grants
+                           the mechanic outright (here, ignore fire res entirely)
+                           rather than a number.
       - quality_stats    — effect per point of gem quality (kept separate from
                            stats: e.g. number_of_chains 0.1 is per-quality, NOT flat)
       - is_support       — true for support gems
@@ -484,6 +489,254 @@ def get_skill_details(query: str) -> dict:
     if skill is None:
         return {"error": f"No skill matching {query!r} in the gem database."}
     return skill
+
+
+# Damage-type tokens that can appear in a support's "..._+%_final" stat id, mapped
+# to the skill dimension that must be present for the multiplier to actually apply.
+# A fire spell scales 'spell'/'area'/'elemental'/'fire'/generic, so a Brutality
+# ("physical_damage_+%_final") does nothing on it — that is what makes this build-aware.
+_DAMAGE_TOKENS = ("spell", "attack", "melee", "projectile", "area",
+                  "fire", "cold", "lightning", "physical", "chaos", "elemental",
+                  "minion", "over_time")
+# Damage-scope tags a support can require; if the skill has none of these but the
+# support requires one, its "damage" is scoped to a domain this skill doesn't use
+# (e.g. Hourglass requires DamageOverTime — useless on a pure-hit spell).
+_SCOPE_TAGS = {"DamageOverTime", "DegenOnlySpellDamage", "Minion"}
+# Ailment tokens → the element that must be dealt for the ailment to land at all.
+_AILMENT_ELEMENT = {
+    "ignit": "fire", "scorch": "fire", "burn": "fire",
+    "freeze": "cold", "chill": "cold",
+    "shock": "lightning",
+    "bleed": "physical", "bleeding": "physical",
+    "poison": "chaos",
+}
+_RESIST_KEYS = {"fire": "enemyFireResist", "cold": "enemyColdResist",
+                "lightning": "enemyLightningResist", "chaos": "enemyChaosResist"}
+
+
+def _skill_damage_dims(tags: set[str]) -> set[str]:
+    """The damage dimensions a skill scales, derived from its skill_types — used to
+    decide which '..._+%_final' multipliers actually do anything for it."""
+    dims = {"generic"}  # plain damage / hit_damage / all_damage always apply
+    for t in ("Spell", "Attack", "Melee", "Projectile", "Area"):
+        if t in tags:
+            dims.add(t.lower())
+    for el in ("Fire", "Cold", "Lightning"):
+        if el in tags:
+            dims.add(el.lower())
+            dims.add("elemental")
+    if "Physical" in tags:
+        dims.add("physical")
+    if "Chaos" in tags:
+        dims.add("chaos")
+    if "Minion" in tags:
+        dims.add("minion")
+    if {"DamageOverTime", "DegenOnlySpellDamage"} & tags:
+        dims.add("over_time")
+    return dims
+
+
+def _classify_support(gem: dict, dims: set[str], elements: set[str], tags: set[str]) -> dict:
+    """Bucket a support and score it for a skill with the given damage dims/elements.
+
+    Returns {bucket, score, applicable, key_stats, note}. Buckets:
+      penetration  — base_reduce_enemy_*_resistance_% (matched to an element dealt)
+      generic_more — an unconditional '..._+%_final' to damage the skill deals
+      conditional  — a '_final' gated on an ailment/stun/low-life/charge/etc.
+      utility      — AoE, duration, speed, or no damage payload
+    """
+    stats = gem.get("stats") or []
+    key_stats = [(s["id"], s["value"]) for s in stats
+                 if s["id"].endswith("_final")
+                 or ("resistance" in s["id"] and ("reduce_enemy" in s["id"] or "ignore" in s["id"]))]
+
+    # Penetration: resistance reduction OR outright ignore, matched to an element
+    # the skill deals. An "ignore" flag (value True) zeroes the resistance entirely,
+    # so it scores above any percentage reduction.
+    for s in stats:
+        sid = s["id"]
+        is_reduce = "reduce_enemy" in sid and "resistance" in sid
+        is_ignore = "ignore" in sid and "resistance" in sid
+        if is_reduce or is_ignore:
+            el = next((e for e in ("fire", "cold", "lightning", "chaos") if e in sid), None)
+            applicable = el in elements if el else False
+            if is_ignore:
+                score, kind = 999.0, f"hits IGNORE enemy {el} resistance entirely"
+            else:
+                score, kind = float(s["value"]), f"penetrates enemy {el} resistance"
+            note = kind if applicable else f"{el} penetration — this skill deals no {el} damage"
+            return {"bucket": "penetration", "score": score,
+                    "applicable": applicable, "key_stats": key_stats, "note": note}
+
+    best = None  # (score, note, applicable, bucket) for the strongest damage payload
+    for s in stats:
+        sid, val = s["id"], s["value"]
+        if not sid.endswith("_final"):
+            continue
+        ail = next((a for a in _AILMENT_ELEMENT if a in sid), None)
+
+        if ail and any(k in sid for k in ("damage", "effect", "magnitude",
+                                          "chance", "multiplier")):
+            # An ailment payload (chance/effect/magnitude). Only pays out if the
+            # skill deals the matching element AND you scale that ailment.
+            el = _AILMENT_ELEMENT[ail]
+            applicable = el in elements
+            note = (f"only adds damage if you scale {ail.rstrip('e')} ({el}) ailments"
+                    if applicable else f"{ail}-based — this skill deals no {el} damage")
+            cand = (float(val), note, applicable, "conditional")
+        elif "damage" not in sid:
+            # speed / AoE / duration / knockback / armour-break — not a hit-damage
+            # multiplier; let it fall through to the utility bucket.
+            continue
+        elif any(k in sid for k in ("stun", "low_life", "full_life", "broken_armour",
+                                    "consume", "charge", "enrag", "rage", "pin",
+                                    "executioner", "ruthless", "critical", "fully_broken")):
+            cand = (float(val), "situational — needs the gated condition met",
+                    False, "conditional")
+        else:
+            toks = [t for t in _DAMAGE_TOKENS if t in sid]
+            if toks:  # typed multiplier — applies only if the skill deals that type
+                applicable = any(t in dims for t in toks)
+                note = ("more " + "/".join(toks) + " damage" if applicable
+                        else "/".join(toks) + " — not a damage type this skill deals")
+            else:  # untyped "damage" — applies unless the support is scoped to a
+                # domain (DoT/minion) the skill doesn't use, per its `requires`.
+                scope = _SCOPE_TAGS & set(gem.get("requires") or [])
+                if scope and not (scope & tags):
+                    applicable = False
+                    note = f"{'/'.join(sorted(scope))}-scoped — not a hit-damage multiplier here"
+                else:
+                    applicable, note = True, "more damage"
+            cand = (float(val), note, applicable, "generic_more")
+
+        if best is None or cand[0] > best[0]:
+            best = cand
+
+    if best is None:
+        return {"bucket": "utility", "score": 0.0, "applicable": True,
+                "key_stats": key_stats, "note": "AoE / duration / speed — no hit-damage payload"}
+    score, note, applicable, bucket = best
+    # A "more" whose only damage final is a downside (e.g. -35% for movement) isn't
+    # a damage support — file it under utility so it doesn't top the generic bucket.
+    if bucket == "generic_more" and score <= 0:
+        bucket, note = "utility", "no positive damage multiplier — " + note
+    return {"bucket": bucket, "score": score, "applicable": applicable,
+            "key_stats": key_stats, "note": note}
+
+
+@mcp.tool()
+def recommend_supports(skill=None, include_inapplicable: bool = False) -> dict:
+    """
+    Recommend support gems for one of the loaded build's skills, ranked and bucketed.
+
+    THIS is the discovery counterpart to get_skill_details (which only looks a gem up
+    by name). It scans every support in the gem database, keeps the ones compatible
+    with the chosen skill's tags, and buckets each by what it actually does — so you
+    recommend specific gems instead of guessing names, and you can tell the user which
+    MODIFIER TYPE to look for.
+
+    skill — 1-based socket-group index, or an active skill name (e.g. "Firestorm");
+            defaults to the first enabled group. See get_skills / list_skill_groups.
+    include_inapplicable — also return supports whose payload does nothing for this
+            skill (wrong damage type, ailment the skill can't inflict). Off by default.
+
+    Build-aware: a multiplier counts only if the skill scales that damage dimension
+    (a physical "more" does nothing on a fire spell), penetration is matched to an
+    element the skill deals and annotated with the enemy's resistance from the build's
+    Config, and supports already socketed in the group are flagged, not re-suggested.
+
+    Returns buckets — penetration, generic_more (unconditional more-damage),
+    conditional (ailment/stun/low-life/charge-gated), utility — each a list of
+    {name, tier_of (best tier in family), score, mana_multiplier, key_stats, note,
+    already_equipped}. Read `note`/`key_stats`, not raw `score`, when comparing across
+    buckets — a conditional's big number only pays out if you build for it.
+    """
+    build = _require_build()
+    if _gems is None:
+        return {"error": "Gem database not loaded."}
+
+    # Resolve the skill argument to a socket group from the build (no engine needed).
+    groups = [g for g in build.socket_groups]
+    group = None
+    if skill is None:
+        group = next((g for g in groups if g.enabled), groups[0] if groups else None)
+    elif isinstance(skill, int):
+        if 1 <= skill <= len(groups):
+            group = groups[skill - 1]
+    else:
+        q = str(skill).strip().lower()
+        group = (next((g for g in groups if (g.active_skill or "").lower() == q), None)
+                 or next((g for g in groups if q in (g.active_skill or "").lower()), None))
+    if group is None:
+        return {"error": f"no skill group matches {skill!r}. "
+                         f"Available: {[g.active_skill for g in groups]}"}
+
+    active = next((g for g in group.gems if g.is_active), None)
+    if active is None:
+        return {"error": f"group {group.active_skill!r} has no active skill gem."}
+    info = _gems.get(active.skill_id or active.name)
+    if info is None:
+        return {"error": f"{active.name!r} not found in the gem database."}
+
+    tags = set(info.get("skill_types") or [])
+    dims = _skill_damage_dims(tags)
+    elements = {e for e in ("fire", "cold", "lightning", "chaos") if e in dims}
+    equipped = {g.name.lower() for g in group.gems if not g.is_active}
+    # Collapse a support family to its best (highest-score) tier so we suggest the
+    # upgrade target once, not "Fire Penetration I" and "II" as separate lines.
+    enemy_cfg = (build.config or {}).get("placeholders", {})
+
+    by_family: dict[str, dict] = {}
+    singles: list[dict] = []
+    for gem in _gems.supports_for(tags):
+        cls = _classify_support(gem, dims, elements, tags)
+        entry = {
+            "name": gem["name"],
+            "score": cls["score"],
+            "bucket": cls["bucket"],
+            "applicable": cls["applicable"],
+            "mana_multiplier": gem.get("mana_multiplier"),
+            "key_stats": cls["key_stats"],
+            "note": cls["note"],
+            "already_equipped": gem["name"].lower() in equipped,
+        }
+        if cls["bucket"] == "penetration" and cls["applicable"]:
+            el = next((e for e in elements if e in str(cls["key_stats"])), None)
+            res = enemy_cfg.get(_RESIST_KEYS.get(el, ""))
+            if res is not None:
+                entry["note"] += f" (enemy at {res}% in this build's Config)"
+        fams = gem.get("gem_family") or []
+        if fams:
+            key = fams[0]
+            cur = by_family.get(key)
+            if cur is None or entry["score"] > cur["score"]:
+                if cur is not None:
+                    entry["tier_of"] = key
+                by_family[key] = entry
+        else:
+            singles.append(entry)
+
+    rows = list(by_family.values()) + singles
+    buckets: dict[str, list[dict]] = {
+        "penetration": [], "generic_more": [], "conditional": [], "utility": []}
+    for r in rows:
+        if not r["applicable"] and not include_inapplicable:
+            continue
+        buckets[r["bucket"]].append(r)
+    for b in buckets.values():
+        b.sort(key=lambda r: (r["already_equipped"], -r["score"]))
+
+    return {
+        "skill": group.active_skill,
+        "skill_types": sorted(tags),
+        "scales": sorted(dims),
+        "equipped_supports": sorted(equipped),
+        "open_slots_hint": "PoE2 skills take up to 5 supports; compare against equipped_supports",
+        "buckets": buckets,
+        "note": "Compare by `note`/`key_stats`, not raw `score`: a conditional bucket's "
+                "large number only pays out if the build scales that ailment/condition. "
+                "Set include_inapplicable=true to see gems that do nothing here.",
+    }
 
 
 @mcp.tool()

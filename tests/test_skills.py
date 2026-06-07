@@ -41,12 +41,15 @@ skills["SupportFirePenetrationPlayer"] = {
 }
 skills["SupportFirePenetrationPlayerTwo"] = {
 	name = "Fire Penetration II",
-	description = "Supports any skill that Hits enemies.",
+	description = "Supports any skill that Hits enemies, making those Hits ignore enemy Fire resistance.",
 	support = true,
 	requireSkillTypes = { SkillType.Damage, },
 	gemFamily = { "FirePenetration", },
 	levels = { [1] = { levelRequirement = 0, manaMultiplier = 25, }, },
-	statSets = { [1] = { constantStats = { { "base_reduce_enemy_fire_resistance_%", 40 }, }, }, },
+	statSets = { [1] = {
+		constantStats = { },
+		stats = { "hits_ignore_enemy_fire_resistance", },
+	}, },
 }
 '''
 
@@ -123,7 +126,8 @@ def test_family_tiers():
     tiers = fp1["family_tiers"]
     # Lists the OTHER tier, with its numbers, and excludes itself.
     assert [t["name"] for t in tiers] == ["Fire Penetration II"]
-    assert tiers[0]["stats"] == [{"id": "base_reduce_enemy_fire_resistance_%", "value": 40}]
+    # Tier II's effect is a boolean flag-stat (ignore fire res), not a number.
+    assert tiers[0]["stats"] == [{"id": "hits_ignore_enemy_fire_resistance", "value": True}]
     assert g.get("Falling Thunder")["family_tiers"] == []
 
 
@@ -142,3 +146,78 @@ def test_derived_flags():
     cs = g.get("Charged Staff")
     assert cs["reserves_spirit"] is False
     assert cs["consumes_power_charges"] is True
+
+
+def test_supports_for_or_semantics():
+    g = _gem_data()
+    # Fire Penetration I requires {Damage, Attack} (OR): a skill with only Attack
+    # still matches. Fire Penetration II requires {Damage} only, so it does not.
+    names = {s["name"] for s in g.supports_for({"Attack", "Melee"})}
+    assert "Fire Penetration I" in names
+    assert "Fire Penetration II" not in names
+    # A skill with Damage matches both.
+    names2 = {s["name"] for s in g.supports_for({"Damage"})}
+    assert {"Fire Penetration I", "Fire Penetration II"} <= names2
+
+
+def test_flag_stats_parsed_as_boolean():
+    g = _gem_data()
+    # Fire Penetration II's effect is a flag-stat (no number) — it must survive
+    # extraction as a boolean, not get dropped with the empty constantStats.
+    fp2 = g.get("Fire Penetration II")
+    assert {"id": "hits_ignore_enemy_fire_resistance", "value": True} in fp2["stats"]
+    # The numeric tier is untouched.
+    assert g.get("Fire Penetration I")["stats"] == [
+        {"id": "base_reduce_enemy_fire_resistance_%", "value": 30}]
+
+
+def test_classify_penetration_matches_element():
+    from poe2_mcp.server import _classify_support, _skill_damage_dims
+    g = _gem_data()
+    pen = g.get("Fire Penetration I")
+    fire_tags = {"Spell", "Fire", "Area"}
+    dims = _skill_damage_dims(fire_tags)
+    fire = _classify_support(pen, dims, {"fire"}, fire_tags)
+    assert fire["bucket"] == "penetration" and fire["applicable"] is True
+    # Same gem on a cold-only skill: fire pen does nothing.
+    cold_tags = {"Spell", "Cold"}
+    cold = _classify_support(pen, _skill_damage_dims(cold_tags), {"cold"}, cold_tags)
+    assert cold["bucket"] == "penetration" and cold["applicable"] is False
+
+
+def test_classify_ignore_resistance_flag():
+    from poe2_mcp.server import _classify_support, _skill_damage_dims
+    g = _gem_data()
+    fp2 = g.get("Fire Penetration II")
+    fire_tags = {"Spell", "Fire", "Area"}
+    res = _classify_support(fp2, _skill_damage_dims(fire_tags), {"fire"}, fire_tags)
+    # The flag is recognised as penetration and outscores any % reduction.
+    assert res["bucket"] == "penetration" and res["applicable"] is True
+    assert res["score"] > 100 and "IGNORE" in res["note"]
+
+
+def test_classify_buckets_and_scope():
+    from poe2_mcp.server import _classify_support, _skill_damage_dims
+    fire_tags = {"Spell", "Fire", "Area"}
+    dims = _skill_damage_dims(fire_tags)
+
+    def classify(stats, requires=None):
+        gem = {"stats": [{"id": i, "value": v} for i, v in stats],
+               "requires": requires or []}
+        return _classify_support(gem, dims, {"fire"}, fire_tags)
+
+    # Typed multiplier the skill scales → generic_more, applicable.
+    area = classify([("support_x_area_damage_+%_final", 30)])
+    assert area["bucket"] == "generic_more" and area["applicable"] is True
+    # Physical multiplier on a fire skill → applicable False.
+    phys = classify([("support_x_physical_damage_+%_final", 30)])
+    assert phys["applicable"] is False
+    # Ignite payload → conditional (skill deals fire, so it *could* apply).
+    ign = classify([("support_x_chance_to_ignite_+%_final", 200)])
+    assert ign["bucket"] == "conditional"
+    # Untyped "damage" but DoT-scoped via requires → not a hit multiplier here.
+    dot = classify([("support_x_damage_+%_final", 30)], requires=["DamageOverTime"])
+    assert dot["applicable"] is False
+    # A pure utility final (speed) → utility bucket.
+    util = classify([("support_x_cast_speed_+%_final", 20)])
+    assert util["bucket"] == "utility"

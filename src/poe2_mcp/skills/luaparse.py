@@ -130,6 +130,30 @@ def _stat_pairs(body: str, field: str) -> list[dict]:
     return out
 
 
+def _flag_stats(body: str) -> list[str]:
+    """Boolean stat ids from a statSet's `stats = { "id", ... }` list — flags with
+    no numeric value (e.g. "hits_ignore_enemy_fire_resistance", "never_freeze").
+
+    These live in a block named exactly `stats` (lowercase), distinct from the
+    `constantStats`/`qualityStats` numeric blocks — the negative lookbehind keeps
+    this from matching those (and the lowercase spelling won't match the capital-S
+    `...Stats` names either). A flag is a bare quoted string; any `{ "id", num }`
+    pair would belong to numeric extraction, so it is excluded."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for m in re.finditer(r"(?<![A-Za-z])stats\s*=\s*\{", body):
+        inner = _match_braces(body, m.end() - 1)
+        if not inner:
+            continue
+        pairs = set(re.findall(r'\{\s*"([^"]+)"\s*,', inner))
+        for sid in re.findall(r'"([^"]+)"', inner):
+            if sid in pairs or sid in seen:
+                continue
+            seen.add(sid)
+            out.append(sid)
+    return out
+
+
 def _parse_block(skill_id: str, body: str) -> dict:
     skill_types: list[str] = []
     st = re.search(r"skillTypes\s*=\s*\{", body)
@@ -147,6 +171,15 @@ def _parse_block(skill_id: str, body: str) -> dict:
     mana_mult = _MANA_MULT_RE.search(body)
     mana_multiplier = float(mana_mult.group(1)) if mana_mult else None
 
+    # Numeric flat effects plus boolean flag-stats, merged into one list. A flag
+    # carries value True (it grants the mechanic outright, e.g. ignore a resistance);
+    # a numeric pair already present wins, so flags never shadow a real number.
+    numeric_stats = _stat_pairs(body, "constantStats")
+    numeric_ids = {s["id"] for s in numeric_stats}
+    stats = numeric_stats + [
+        {"id": sid, "value": True} for sid in _flag_stats(body) if sid not in numeric_ids
+    ]
+
     return {
         "name": _str_field(body, "name"),
         "base_type": _str_field(body, "baseTypeName"),
@@ -161,7 +194,7 @@ def _parse_block(skill_id: str, body: str) -> dict:
         "requires": _typelist(body, "requireSkillTypes"),      # supported skill must have these
         "adds_skill_types": _typelist(body, "addSkillTypes"),   # types the support grants (e.g. Triggered)
         "excludes_skill_types": _typelist(body, "excludeSkillTypes"),  # types that disqualify the skill
-        "stats": _stat_pairs(body, "constantStats"),            # flat effects (the real strength)
+        "stats": stats,                                         # flat numeric + boolean flag effects
         "quality_stats": _stat_pairs(body, "qualityStats"),     # effect per point of gem quality
         "mana_multiplier": mana_multiplier,
         # Applicability / provenance flags worth honouring in advice.
