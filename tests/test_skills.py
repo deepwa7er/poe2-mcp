@@ -25,12 +25,35 @@ skills["FallingThunderPlayer"] = {
 	castTime = 1,
 	levels = { [1] = { levelRequirement = 1, }, },
 }
+skills["SupportFirePenetrationPlayer"] = {
+	name = "Fire Penetration I",
+	description = "Supports any skill that Hits enemies, making those Hits Penetrate enemy Fire resistance.",
+	support = true,
+	requireSkillTypes = { SkillType.Damage, SkillType.Attack, },
+	addSkillTypes = { SkillType.Triggered, },
+	excludeSkillTypes = { SkillType.InbuiltTrigger, },
+	gemFamily = { "FirePenetration", },
+	levels = { [1] = { levelRequirement = 0, manaMultiplier = 20, }, },
+	statSets = { [1] = {
+		constantStats = { { "base_reduce_enemy_fire_resistance_%", 30 }, },
+		qualityStats = { { "number_of_chains", 0.1 }, },
+	}, },
+}
+skills["SupportFirePenetrationPlayerTwo"] = {
+	name = "Fire Penetration II",
+	description = "Supports any skill that Hits enemies.",
+	support = true,
+	requireSkillTypes = { SkillType.Damage, },
+	gemFamily = { "FirePenetration", },
+	levels = { [1] = { levelRequirement = 0, manaMultiplier = 25, }, },
+	statSets = { [1] = { constantStats = { { "base_reduce_enemy_fire_resistance_%", 40 }, }, }, },
+}
 '''
 
 
 def test_parse_skills_lua_fields_and_braces():
     skills = parse_skills_lua(LUA)
-    assert set(skills) == {"CombatFrenzyPlayer", "FallingThunderPlayer"}
+    assert {"CombatFrenzyPlayer", "FallingThunderPlayer"} <= set(skills)
 
     cf = skills["CombatFrenzyPlayer"]
     assert cf["name"] == "Combat Frenzy"
@@ -43,6 +66,26 @@ def test_parse_skills_lua_fields_and_braces():
     assert "Attack" in ft["skill_types"]
     # Escaped quotes in the description are unescaped, and the matcher didn't stop early.
     assert '"consuming"' in ft["description"]
+    # Active skills carry no support metadata.
+    assert ft["is_support"] is False
+    assert ft["stats"] == []
+
+
+def test_parse_support_mechanics():
+    skills = parse_skills_lua(LUA)
+    fp = skills["SupportFirePenetrationPlayer"]
+    assert fp["is_support"] is True
+    assert fp["gem_family"] == ["FirePenetration"]
+    assert fp["requires"] == ["Damage", "Attack"]
+    assert fp["adds_skill_types"] == ["Triggered"]
+    assert fp["excludes_skill_types"] == ["InbuiltTrigger"]
+    assert fp["mana_multiplier"] == 20
+    # The actual numeric effect — a support's real strength, not its level.
+    assert {"id": "base_reduce_enemy_fire_resistance_%", "value": 30} in fp["stats"]
+    # constantStats and qualityStats must not be conflated: the per-quality-point
+    # number_of_chains belongs in quality_stats, never in stats.
+    assert {"id": "number_of_chains", "value": 0.1} in fp["quality_stats"]
+    assert all(s["id"] != "number_of_chains" for s in fp["stats"])
 
 
 def _gem_data() -> GemData:
@@ -65,6 +108,23 @@ def test_lookup_by_id_and_name():
     assert g.get("CombatFrenzyPlayer")["name"] == "Combat Frenzy"
     assert g.get("combat frenzy")["name"] == "Combat Frenzy"   # by display name
     assert g.get("Nonexistent Skill") is None
+
+
+def test_lookup_strips_tier_numeral():
+    g = _gem_data()
+    # A bare name resolves to a tier ("Fire Penetration" → the lowest, I).
+    assert g.get("Fire Penetration")["name"] == "Fire Penetration I"
+    assert g.get("Fire Penetration II")["name"] == "Fire Penetration II"
+
+
+def test_family_tiers():
+    g = _gem_data()
+    fp1 = g.get("Fire Penetration I")
+    tiers = fp1["family_tiers"]
+    # Lists the OTHER tier, with its numbers, and excludes itself.
+    assert [t["name"] for t in tiers] == ["Fire Penetration II"]
+    assert tiers[0]["stats"] == [{"id": "base_reduce_enemy_fire_resistance_%", "value": 40}]
+    assert g.get("Falling Thunder")["family_tiers"] == []
 
 
 def test_derived_flags():

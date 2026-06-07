@@ -372,6 +372,19 @@ def get_skills() -> list[dict]:
     Each group shows the active skill, its support gems, the slot it occupies,
     and whether it is enabled. Each gem includes its skill_id — pass that (or the
     gem name) to get_skill_details to look up the gem's mechanics.
+
+    READ THIS before interpreting `level`/`quality` (PoE2 ≠ PoE1):
+      - For SUPPORT gems, `level` is NOT an XP-driven power level. PoE2 supports
+        are not levelled up; the export stores them as level 1 / quality 0 as an
+        artifact. A support showing "level": 1 is NOT weak or unfinished — do not
+        advise "levelling up" a support. Its power comes from its TIER (the
+        trailing numeral in the name: "Fire Penetration I" < "II" < "III") and
+        from the numeric `stats` get_skill_details returns. To upgrade a support
+        you swap it for a higher tier, you do not level it.
+      - For ACTIVE skill gems, `level` IS meaningful and scales the skill — those
+        are the gems worth raising via higher uncut gems.
+    Never quote a support's mechanical strength from this field; get the numbers
+    from get_skill_details instead.
     """
     build = _require_build()
     return [
@@ -401,11 +414,46 @@ def get_skill_details(query: str) -> dict:
     Look up a skill or support gem's mechanics in the bundled PoB2 gem database.
 
     Accepts a display name ("Falling Thunder", "Combat Frenzy") or a skill_id from
-    get_skills ("FallingThunderPlayer"). Returns the gem's name, tags (skill_types),
-    base Spirit reservation, mechanic description, and derived flags:
-      - reserves_spirit         — holds a Spirit reservation while active
-      - generates_charges       — grants charges (e.g. on freeze/electrocute/kill)
-      - consumes_power_charges  — spends power charges for added effect
+    get_skills ("FallingThunderPlayer"). A tier numeral is optional — "Minion Pact"
+    resolves to "Minion Pact I". Returns the gem's name, tags (skill_types), base
+    Spirit reservation, mechanic description, and:
+      - stats            — the gem's flat numeric effects as {id, value}, e.g.
+                           {"id": "base_reduce_enemy_fire_resistance_%", "value": 30}.
+                           THIS is a support's real strength — read it instead of
+                           inferring from the gem's level (see get_skills).
+      - quality_stats    — effect per point of gem quality (kept separate from
+                           stats: e.g. number_of_chains 0.1 is per-quality, NOT flat)
+      - is_support       — true for support gems
+      - requires / adds_skill_types / excludes_skill_types — a support's skill-type
+                           gating: must-have types, types it grants (e.g. Triggered),
+                           and disqualifying types. An Attack-only support does
+                           nothing on a Spell; empty for actives
+      - mana_multiplier  — a support's mana surcharge (% of base cost)
+      - family_tiers     — the gem's OTHER tiers (same gemFamily) with their own
+                           stats, so you can compare I/II/III and recommend an
+                           upgrade in one call
+      - weapon_types     — weapon a skill requires (Staff, ...); minion_list — what
+                           it summons; hidden / legacy / cannot_be_supported /
+                           from_item / from_tree — don't recommend socketing these
+      - reserves_spirit / generates_charges / consumes_power_charges — derived flags
+
+    Interpreting `stats` (these are raw PoB stat ids + bare numbers, no bundled
+    human translation — read them by convention):
+      - "..._+%_final" / "..._final"  → a MORE / LESS multiplier (multiplicative),
+        e.g. spell_damage_+%_final 35 = "35% more"; a negative is "less". This is
+        the one that bites: a plain "..._+%" WITHOUT _final is additive "increased/
+        reduced" instead — do not treat the two the same.
+      - "..._%" / "..._+%"            → the value is a percent; sign matters.
+      - "base_..."                    → a flat/base value (e.g. base_reduce_enemy_
+        fire_resistance_% 30 = 30 points of penetration).
+      - quality_stats values are PER POINT of gem quality (multiply by the gem's
+        quality %); they are deliberately NOT merged into stats.
+      - mana_multiplier N             → +N% to the supported skill's mana cost
+        (total ×(1+N/100)); negative reduces it.
+      - requires / excludes_skill_types may contain "AND"/"OR" — PoB logical
+        operators, not skill types. The list is a boolean expression over types,
+        NOT a flat "must have all of these"; treat it as guidance, the exact
+        default (AND vs OR) evaluation is not modelled here.
 
     No build needs to be loaded. Returns an error if the gem database is absent
     (generate it with scripts/build_skill_data.py or set SKILL_DATA_PATH).

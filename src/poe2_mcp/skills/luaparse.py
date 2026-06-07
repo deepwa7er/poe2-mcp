@@ -26,6 +26,11 @@ import re
 _KEY_RE = re.compile(r'skills\[\s*"([^"]+)"\s*\]\s*=\s*\{')
 _SKILLTYPE_RE = re.compile(r"SkillType\.(\w+)")
 _RESERVE_RE = re.compile(r"spiritReservationFlat\s*=\s*(\d+)")
+# A flat numeric effect, e.g. { "base_reduce_enemy_fire_resistance_%", 30 }. These
+# live in statSets[*].constantStats and are the gem's actual mechanical values —
+# the difference between knowing a support "penetrates fire res" and "= 30% pen".
+_STAT_PAIR_RE = re.compile(r'\{\s*"([^"]+)"\s*,\s*(-?\d+(?:\.\d+)?)\s*\}')
+_MANA_MULT_RE = re.compile(r"manaMultiplier\s*=\s*(-?\d+(?:\.\d+)?)")
 
 
 def parse_skills_lua(text: str) -> dict[str, dict]:
@@ -72,6 +77,59 @@ def _str_field(body: str, name: str) -> str:
     return m.group(1).replace('\\"', '"').replace("\\\\", "\\").strip()
 
 
+def _typelist(body: str, field: str) -> list[str]:
+    """Return the SkillType.* names listed in `field = { ... }`, or []."""
+    m = re.search(field + r"\s*=\s*\{", body)
+    if not m:
+        return []
+    inner = _match_braces(body, m.end() - 1)
+    return _SKILLTYPE_RE.findall(inner) if inner else []
+
+
+def _names_in(body: str, field: str) -> list[str]:
+    """Return the quoted strings listed in `field = { "a", "b" }`, or []."""
+    m = re.search(field + r"\s*=\s*\{", body)
+    if not m:
+        return []
+    inner = _match_braces(body, m.end() - 1)
+    return re.findall(r'"([^"]+)"', inner) if inner else []
+
+
+def _bracket_keys(body: str, field: str) -> list[str]:
+    """Return the keys of a `field = { ["Staff"] = true, ... }` set, or []."""
+    m = re.search(field + r"\s*=\s*\{", body)
+    if not m:
+        return []
+    inner = _match_braces(body, m.end() - 1)
+    return re.findall(r'\[\s*"([^"]+)"\s*\]', inner) if inner else []
+
+
+def _flag(body: str, name: str) -> bool:
+    return bool(re.search(rf"\b{name}\s*=\s*true\b", body))
+
+
+def _stat_pairs(body: str, field: str) -> list[dict]:
+    """Parse the `{ "id", num }` pairs inside every `field = { ... }` block in
+    body (a gem can have several statSets) as {id, value}, deduped first-wins.
+
+    Scoped to the named block — crucial so constantStats (flat effects) and
+    qualityStats (per-quality-point effects, often fractional like number_of_chains
+    = 0.1) don't get conflated."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for m in re.finditer(field + r"\s*=\s*\{", body):
+        inner = _match_braces(body, m.end() - 1)
+        if not inner:
+            continue
+        for sid, val in _STAT_PAIR_RE.findall(inner):
+            if sid in seen:
+                continue
+            seen.add(sid)
+            num = float(val)
+            out.append({"id": sid, "value": int(num) if num.is_integer() else num})
+    return out
+
+
 def _parse_block(skill_id: str, body: str) -> dict:
     skill_types: list[str] = []
     st = re.search(r"skillTypes\s*=\s*\{", body)
@@ -86,6 +144,9 @@ def _parse_block(skill_id: str, body: str) -> dict:
     cast = re.search(r"castTime\s*=\s*([\d.]+)", body)
     cast_time = float(cast.group(1)) if cast else None
 
+    mana_mult = _MANA_MULT_RE.search(body)
+    mana_multiplier = float(mana_mult.group(1)) if mana_mult else None
+
     return {
         "name": _str_field(body, "name"),
         "base_type": _str_field(body, "baseTypeName"),
@@ -93,4 +154,22 @@ def _parse_block(skill_id: str, body: str) -> dict:
         "skill_types": skill_types,
         "spirit_reservation": spirit_reservation,
         "cast_time": cast_time,
+        # Support-gem mechanics: what it does (numbers), what skills it attaches to
+        # and how it reshapes them, its tier family, and its mana surcharge.
+        "is_support": _flag(body, "support"),
+        "gem_family": _names_in(body, "gemFamily"),
+        "requires": _typelist(body, "requireSkillTypes"),      # supported skill must have these
+        "adds_skill_types": _typelist(body, "addSkillTypes"),   # types the support grants (e.g. Triggered)
+        "excludes_skill_types": _typelist(body, "excludeSkillTypes"),  # types that disqualify the skill
+        "stats": _stat_pairs(body, "constantStats"),            # flat effects (the real strength)
+        "quality_stats": _stat_pairs(body, "qualityStats"),     # effect per point of gem quality
+        "mana_multiplier": mana_multiplier,
+        # Applicability / provenance flags worth honouring in advice.
+        "weapon_types": _bracket_keys(body, "weaponTypes"),     # weapon a skill requires
+        "minion_list": _names_in(body, "minionList"),           # what the skill summons
+        "hidden": _flag(body, "hidden"),
+        "legacy": _flag(body, "legacy"),
+        "cannot_be_supported": _flag(body, "cannotBeSupported"),
+        "from_item": _flag(body, "fromItem"),                   # granted by an item, not socketed
+        "from_tree": _flag(body, "fromTree"),                   # granted by the passive tree
     }

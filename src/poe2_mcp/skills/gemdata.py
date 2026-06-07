@@ -16,12 +16,17 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 
 # The tag PoB sets on gems that hold a Spirit reservation while active. (The
 # broader "Buff"/"Persistent" tags also cover activate-and-consume skills like
 # Charged Staff that reserve nothing, so they would over-match here.)
 _RESERVATION_TYPE = "HasReservation"
+
+# Trailing tier numeral on a support's display name ("Fire Penetration I",
+# "Magnified Area II"). Stripped so a bare name from a model resolves to a tier.
+_TIER_SUFFIX = re.compile(r"\s+(?:I{1,3}|IV|VI{0,3}|IX|XI{0,2}|X)$")
 
 _default_path = Path(__file__).parent.parent.parent.parent / "data" / "poe2_skills.json"
 
@@ -32,10 +37,20 @@ class GemData:
         self.meta = meta or {}
         # name → skillId, lowercased, for name-based lookup.
         self._by_name: dict[str, str] = {}
+        # gemFamily → [skillId, ...], so a gem can list its sibling tiers.
+        self._by_family: dict[str, list[str]] = {}
         for sid, s in skills.items():
             for label in (s.get("name"), s.get("base_type")):
-                if label:
-                    self._by_name.setdefault(label.lower(), sid)
+                if not label:
+                    continue
+                self._by_name.setdefault(label.lower(), sid)
+                # Also register the tier-stripped name ("Fire Penetration" →
+                # the lowest tier) so "Minion Pact" resolves to "Minion Pact I".
+                base = _TIER_SUFFIX.sub("", label).strip().lower()
+                if base != label.lower():
+                    self._by_name.setdefault(base, sid)
+            for fam in s.get("gem_family") or []:
+                self._by_family.setdefault(fam, []).append(sid)
 
     def get(self, query: str) -> dict | None:
         """Look a gem up by skillId (exact), then by display name (case-insensitive).
@@ -70,7 +85,31 @@ class GemData:
         # Stem "consum" covers consume/consumes/consuming.
         desc = (s.get("description") or "").lower()
         s["consumes_power_charges"] = "consum" in desc and "power charge" in desc
+        s["family_tiers"] = self._family_tiers(skill_id, s.get("gem_family") or [])
         return s
+
+    def _family_tiers(self, skill_id: str, families: list[str]) -> list[dict]:
+        """Sibling gems sharing this gem's family (its other tiers), with their
+        numeric effects — so advice can compare e.g. Fire Penetration I/II/III
+        without a lookup per tier. Excludes the gem itself; empty for actives."""
+        sibling_ids: list[str] = []
+        seen = {skill_id}
+        for fam in families:
+            for sid in self._by_family.get(fam, []):
+                if sid not in seen:
+                    seen.add(sid)
+                    sibling_ids.append(sid)
+        tiers = [
+            {
+                "skill_id": sid,
+                "name": self._skills[sid].get("name"),
+                "stats": self._skills[sid].get("stats") or [],
+                "mana_multiplier": self._skills[sid].get("mana_multiplier"),
+            }
+            for sid in sibling_ids
+        ]
+        tiers.sort(key=lambda t: t["name"] or "")
+        return tiers
 
 
 def load_gem_data(path: str | Path) -> GemData:
