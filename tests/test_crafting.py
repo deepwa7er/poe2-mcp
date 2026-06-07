@@ -1,5 +1,6 @@
 from poe2_mcp.crafting.data import CraftData, _pattern_for
 from poe2_mcp.crafting.advisor import advise
+from poe2_mcp.crafting.knowledge import acquisition_model, acquisition_brief
 from poe2_mcp.pob.models import Item
 
 
@@ -162,3 +163,41 @@ def test_advise_cannot_roll_here():
     it = _item("Sapphire Ring", ["+50 to maximum Life"])
     r = advise(it, "attack speed", cd)
     assert r["can_roll"] is False
+
+
+# -- acquisition knowledge ("tool memory") -----------------------------------
+
+def test_acquisition_model_shape():
+    m = acquisition_model()
+    # Every section the how_crafting_works tool promises is present.
+    for key in ("patch", "core_principle", "currencies", "targeted_tools",
+                "omens", "routes_to_add_a_mod", "caveats"):
+        assert key in m
+    # The core truth must be stated: no targeted single-mod swap.
+    assert "scouring" in m["core_principle"].lower()
+    names = {c["name"] for c in m["currencies"]}
+    assert {"Chaos Orb", "Exalted Orb", "Divine Orb"} <= names
+    # Chaos is random remove+add, Divine only rerolls values — keep those honest.
+    chaos = next(c for c in m["currencies"] if c["name"] == "Chaos Orb")
+    assert chaos["mode"] == "random"
+    divine = next(c for c in m["currencies"] if c["name"] == "Divine Orb")
+    assert divine["mode"] == "reroll"
+
+
+def test_acquisition_brief_is_compact_subset():
+    b = acquisition_brief()
+    assert b["core_principle"] == acquisition_model()["core_principle"]
+    assert b["routes_to_add_a_mod"] == acquisition_model()["routes_to_add_a_mod"]
+    # The brief points at the full model rather than inlining currencies/omens.
+    assert "currencies" not in b
+
+
+def test_advise_rides_along_acquisition_model():
+    cd = _cd()
+    it = _item("Sapphire Ring", ["+50 to maximum Life"])
+    # Present on a normal success...
+    assert "acquisition" in advise(it, "cold resistance", cd)
+    # ...on can't-roll-here...
+    assert "acquisition" in advise(it, "attack speed", cd)
+    # ...and on an unknown base.
+    assert "acquisition" in advise(_item("Mystery Base", []), "life", cd)

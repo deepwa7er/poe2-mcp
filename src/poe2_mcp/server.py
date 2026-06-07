@@ -21,6 +21,7 @@ Tools:
   get_point_budget — passive/ascendancy point usage summary
   analyze_defenses — defensive sanity checks (resists, health pool)
   list_mods_for_base — the affix pool that can roll on a base (tiers, weights, ilvl)
+  how_crafting_works — durable model of PoE2 acquisition (currencies, omens, what's targetable)
   craft_advisor   — build-aware advice for adding a stat to an item (slots, risk-rated methods)
   generate_vendor_regex — build-aware vendor-search regex for one slot (under a char budget)
   get_meta_overview — poe.ninja ascendancy popularity for a league
@@ -41,7 +42,11 @@ from .skills import GemData, load_default_gem_data
 from .pob_engine import get_engine, PobEngineError, PRESETS
 from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
 from .community import poeninja
-from .crafting import load_default_craft_data, advise as _advise_craft
+from .crafting import (
+    load_default_craft_data,
+    advise as _advise_craft,
+    acquisition_model as _acquisition_model,
+)
 from .vendor_regex import (
     FRAGMENTS as _VENDOR_FRAGMENTS,
     build_regex as _vendor_build_regex,
@@ -94,8 +99,22 @@ def _load_build_from_xml(xml: str) -> Build:
     _build = parse_build_xml(xml)
     _build_xml = xml  # retained so the headless engine can recompute this build
     if _tree is not None:
-        _build.passive_nodes = _tree.resolve_ids(_build.allocated_node_ids)
+        cls, asc = _build_class_ctx()
+        _build.passive_nodes = _tree.resolve_ids(_build.allocated_node_ids, cls, asc)
     return _build
+
+
+def _build_class_ctx() -> tuple[str | None, str | None]:
+    """(class_name, ascendancy) of the loaded build, for class-aware node resolution.
+
+    Two PoE2 classes share each attribute start, and their near-start nodes differ,
+    so node names/stats must be resolved against the build's class (e.g. a Witch sees
+    "Entropy" where a Sorceress sees "Principal Infusion"). Returns (None, None) when
+    no build is loaded, which yields the default (class-agnostic) variant.
+    """
+    if _build is None:
+        return None, None
+    return (_build.class_name or None), (_build.ascendancy or None)
 
 
 def _loaded_build_summary(source: str = "") -> str:
@@ -575,7 +594,13 @@ def search_tree(
 
     Use classes to restrict results to one or more class regions (Voronoi partition).
     This eliminates nodes from the opposite side of the tree that are never reachable
-    in practice. Valid class names: Druid, Huntress, Mercenary, Monk, Sorceress, Warrior.
+    in practice. Valid class names: Druid, Huntress, Mercenary, Monk, Ranger, Sorceress,
+    Warrior, Witch (paired classes like Witch/Sorceress share a region, so either name
+    matches the same nodes).
+
+    Node names/stats are resolved for the loaded build's class — switchable start-area
+    nodes differ per class (e.g. a Witch build sees "Entropy" where the default is
+    "Principal Infusion"), and matching respects that variant.
 
     A build does not need to be loaded. Tree data must be present.
 
@@ -592,7 +617,8 @@ def search_tree(
 
     distance_map = _build_distance_map(allocated_ids) if allocated_ids else {}
 
-    matches = _tree.search(query, classes=classes)
+    cls, asc = _build_class_ctx()
+    matches = _tree.search(query, classes=classes, class_name=cls, ascendancy=asc)
 
     if not include_small_nodes:
         matches = [n for n in matches if n.is_keystone or n.is_notable or n.is_mastery]
@@ -629,7 +655,10 @@ def get_reachable_nodes(
 
     Use classes to restrict results to one or more class regions, filtering out nodes
     from unrelated parts of the tree. Valid class names: Druid, Huntress, Mercenary,
-    Monk, Sorceress, Warrior.
+    Monk, Ranger, Sorceress, Warrior, Witch (paired classes share a region).
+
+    Node names/stats are resolved for the loaded build's class, so switchable
+    start-area nodes show the build's variant.
 
     Requires both a loaded build and tree data.
     """
@@ -645,19 +674,20 @@ def get_reachable_nodes(
         reachable = [(n, d) for n, d in reachable if n.is_keystone or n.is_notable or n.is_mastery]
 
     if classes:
-        class_set = set(classes)
-        reachable = [(n, d) for n, d in reachable if _tree.region_of(n.id) in class_set]
+        wanted = _tree.expand_classes(classes)
+        reachable = [(n, d) for n, d in reachable if _tree.region_of(n.id) in wanted]
 
+    cls, asc = _build_class_ctx()
     return [
         {
-            "id": n.id,
-            "name": n.name,
-            "type": _node_type(n),
-            "stats": n.stats,
-            "ascendancy": n.ascendancy_name,
+            "id": v.id,
+            "name": v.name,
+            "type": _node_type(v),
+            "stats": v.stats,
+            "ascendancy": v.ascendancy_name,
             "distance_from_build": dist,
         }
-        for n, dist in reachable
+        for v, dist in ((_tree.view(n, cls, asc), dist) for n, dist in reachable)
     ]
 
 
@@ -669,6 +699,10 @@ def get_node(node_id: int) -> dict:
     Returns the node's name, type, stats, ascendancy, and class region, plus the
     list of directly connected nodes (id/name/type). Useful for navigating outward
     from a node found via search_tree. Tree data must be loaded; no build required.
+
+    name/stats are resolved for the loaded build's class. When a node is switchable
+    (its content differs by class), a "variants" map lists every per-class version
+    (under "default" plus each class name) so the differences are explicit.
     """
     if _tree is None:
         return {"error": "Tree data not loaded."}
@@ -677,20 +711,28 @@ def get_node(node_id: int) -> dict:
     if node is None:
         return {"error": f"No node with id {node_id} in the tree."}
 
+    cls, asc = _build_class_ctx()
+    view = _tree.view(node, cls, asc)
     allocated_ids: set[int] = set(_build.allocated_node_ids) if _build is not None else set()
-    return {
-        "id": node.id,
-        "name": node.name,
-        "type": _node_type(node),
-        "stats": node.stats,
-        "ascendancy": node.ascendancy_name,
+    result = {
+        "id": view.id,
+        "name": view.name,
+        "type": _node_type(view),
+        "stats": view.stats,
+        "ascendancy": view.ascendancy_name,
         "region": _tree.region_of(node.id),
         "allocated": node.id in allocated_ids,
         "neighbors": [
-            {"id": nb.id, "name": nb.name, "type": _node_type(nb)}
-            for nb in _tree.neighbor_nodes(node.id)
+            {"id": v.id, "name": v.name, "type": _node_type(v)}
+            for v in (_tree.view(nb, cls, asc) for nb in _tree.neighbor_nodes(node.id))
         ],
     }
+    if node.options:
+        result["variants"] = {
+            "default": {"name": node.name, "stats": node.stats},
+            **{c: {"name": o["name"], "stats": o["stats"]} for c, o in node.options.items()},
+        }
+    return result
 
 
 @mcp.tool()
@@ -713,6 +755,8 @@ def path_to_node(node_id: int) -> dict:
     if target is None:
         return {"error": f"No node with id {node_id} in the tree."}
 
+    cls, asc = _build_class_ctx()
+    target = _tree.view(target, cls, asc)
     path = _tree.shortest_path(set(build.allocated_node_ids), node_id)
     if path is None:
         return {
@@ -726,8 +770,8 @@ def path_to_node(node_id: int) -> dict:
         "target": {"id": target.id, "name": target.name, "type": _node_type(target)},
         "points_required": len(path),
         "path": [
-            {"id": n.id, "name": n.name, "type": _node_type(n)}
-            for n in path
+            {"id": v.id, "name": v.name, "type": _node_type(v)}
+            for v in (_tree.view(n, cls, asc) for n in path)
         ],
     }
 
@@ -781,9 +825,10 @@ def list_mods_for_base(base: str, keyword: str | None = None, kind: str | None =
                 "life", "attack speed".
       kind    — optional "prefix" or "suffix" filter.
 
-    Use craft_advisor instead when you want build-aware advice for a specific equipped
-    item (open slots, lowest-risk method). Returns {error} if crafting data is missing
-    or the base is unknown.
+    This is the raw pool only — which mods CAN roll, not how to obtain them. PoE2 has no
+    targeted single-mod swap; call how_crafting_works for the acquisition model, or
+    craft_advisor for build-aware advice on a specific equipped item (open slots,
+    lowest-risk method). Returns {error} if crafting data is missing or the base is unknown.
     """
     if _craft is None:
         return {"error": "Crafting data not loaded. Generate data/poe2_crafting.json via "
@@ -794,19 +839,54 @@ def list_mods_for_base(base: str, keyword: str | None = None, kind: str | None =
 
 
 @mcp.tool()
+def how_crafting_works() -> dict:
+    """
+    Return the durable model of how PoE2 item acquisition and crafting actually works.
+
+    Call this before reasoning about item upgrades or answering "can I just add/swap
+    this mod?". PoE2 is NOT PoE1: there is no Orb of Scouring, no crafting bench, and no
+    way to drop one chosen mod and add another chosen mod. Almost every currency
+    adds/removes a RANDOM modifier, is one-way, and can brick the item. "Targeted"
+    crafting only means guaranteeing ONE mod (an essence) or biasing a CATEGORY —
+    prefix/suffix/lowest (an omen).
+
+    Returns the full model: the core principle, every core currency (with whether its
+    effect is random / a value reroll / targeted, and its risk to existing mods), the
+    targeted tools (essences, Perfect Essence, runes/soul cores, omens), the omen roster,
+    a ranked list of realistic routes to end up with a wanted mod, and caveats (Magic
+    1+1 / Rare 3+3 caps, same-group exclusivity, item-level tier gating, no scouring).
+
+    Needs no build or data files — this is reference knowledge baked into the server.
+    Patch-sensitive (currently 0.5 / Runes of Aldur); verify specifics against the live
+    game. craft_advisor applies this model to a specific equipped item.
+    """
+    return _acquisition_model()
+
+
+@mcp.tool()
 def craft_advisor(target: str, slot: str | None = None, base: str | None = None) -> dict:
     """
     Advise how to add a target stat to one item, accounting for PoE2 crafting reality.
 
-    PoE2 crafting is largely additive and random, so the hard part isn't getting a mod —
-    it's getting it without sacrificing the mods already on the item. This tool resolves
-    the item's base affix pool and reports:
+    READ THIS — PoE2 crafting is NOT PoE1. There is no Orb of Scouring, no crafting
+    bench, and no way to drop one chosen mod and add another chosen mod. Almost every
+    currency adds/removes a RANDOM mod, is one-way, and can brick the item. "Targeted"
+    only ever means guaranteeing ONE mod (an essence) or biasing a CATEGORY —
+    prefix/suffix/lowest (an omen). So the answer to "give this item mod X" is rarely a
+    surgical edit; it's a rune in a socket, an Exalt into an open slot, an essence on a
+    FRESH base, or just buying the item. Every response carries an `acquisition` block
+    with this model; call how_crafting_works for the full currency/omen breakdown.
+
+    The hard part isn't getting a mod — it's getting it without sacrificing the mods
+    already on the item. This tool resolves the item's base affix pool and reports:
       - whether the target can roll there, and which tiers the item's level allows
       - how many prefix/suffix slots are already used vs. open (inferred from the rolled
         mods; an unclassifiable mod lowers confidence, which is reported)
       - whether the target is already present (then it's a Divine-to-improve case)
-      - a ranked, risk-rated list of methods (open-slot add, rune-in-socket, essence/omen,
-        remove-and-add, replace), with an approximate Exalt-hit chance when a slot is open
+      - a ranked, risk-rated list of methods (open-slot add, rune-in-socket, essence on a
+        fresh base, remove-and-add, replace), with an approximate Exalt-hit chance when a
+        slot is open
+      - an `acquisition` block: the durable model of how PoE2 acquisition works
 
     Target is a stat keyword, e.g. "cold resistance", "maximum life", "attack speed".
     Identify the item by either:

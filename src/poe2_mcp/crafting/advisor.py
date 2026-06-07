@@ -16,6 +16,7 @@ behaviour is game logic, not in the data, so methods are described in general te
 from __future__ import annotations
 
 from .data import CraftData, MAX_AFFIXES
+from .knowledge import acquisition_brief
 
 
 def advise(item, target: str, craft: CraftData) -> dict:
@@ -32,6 +33,7 @@ def advise(item, target: str, craft: CraftData) -> dict:
             "error": f"Base type {item.base_type!r} isn't in the crafting data, so "
                      "the affix pool can't be resolved. (Magic items fold the base "
                      "into the name — this works best on Rare items.)",
+            "acquisition": acquisition_brief(),
         }
 
     pool = craft.mods_for_base(item.base_type, keyword=target)
@@ -48,6 +50,7 @@ def advise(item, target: str, craft: CraftData) -> dict:
         if rune:
             out["rune_option"] = (f"{rune} socketed into an open rune slot grants "
                                   f"{target} with no risk to existing mods.")
+        out["acquisition"] = acquisition_brief()
         return out
 
     ilvl = item.item_level or 0
@@ -102,6 +105,7 @@ def advise(item, target: str, craft: CraftData) -> dict:
         "target_mods": groups_out,
         "methods": methods,
         "caveats": caveats,
+        "acquisition": acquisition_brief(),
     }
 
 
@@ -189,35 +193,45 @@ def _methods(craft, item, rec, ilvl, target, target_gens, target_types,
         odds = _exalt_odds(craft, rec["name"], next(iter(target_gens)), ilvl,
                            present_types, target_types)
         odds_txt = f" Rough odds an Exalt hits {target}: ~{odds}% of open-{gen_label} outcomes." if odds is not None else ""
+        side_omen = ("Omen of Sinistral Exaltation" if "prefix" in target_gens
+                     else "Omen of Dextral Exaltation")
         methods.append({
             "method": "Exalted Orb (add to open slot)",
             "risk": "low",
             "detail": f"The item has a free {gen_label} slot, so adding a mod risks "
-                      "nothing already on it — but an Exalt adds a RANDOM eligible mod, "
-                      f"not necessarily {target}.{odds_txt}",
+                      "nothing already on it (an Exalt only ADDS — it can't brick the "
+                      f"item) — but it adds a RANDOM eligible mod, not necessarily "
+                      f"{target}.{odds_txt} An {side_omen} forces the add onto the "
+                      f"{gen_label} side, narrowing the pool but not picking the exact mod.",
         })
         methods.append({
-            "method": "Essence / omen (targeted)",
+            "method": "Essence on a fresh base (guaranteed)",
             "risk": "low",
-            "detail": "If an essence guarantees this mod type (or an omen biases the "
-                      "affix), that converts the random add into a deterministic one. "
-                      "Essence→mod mappings aren't in this dataset — verify in-game.",
+            "detail": f"To GUARANTEE {target}, the targeted route is to rebuild: apply "
+                      "the essence that grants this mod type to a clean base, then fill "
+                      "the rest. You don't edit the finished item — you craft a new one. "
+                      "Essence→mod mappings aren't in this dataset; verify in-game.",
         })
     else:
         methods.append({
-            "method": f"Remove-and-add (e.g. Chaos Orb) — no open {gen_label} slot",
+            "method": f"Remove-and-add (Chaos Orb / Perfect Essence) — no open {gen_label} slot",
             "risk": "high",
             "detail": f"Every {gen_label} slot is used, so there's no room to add "
-                      f"{target} without first removing a mod. Chaos-style removal is "
-                      "random: it can destroy a mod you wanted to keep. This is the "
-                      "trap to avoid for a small gain.",
+                      f"{target} without first removing a mod, and PoE2 has no targeted "
+                      "single-mod swap. A Chaos Orb removes a RANDOM mod and adds a "
+                      "RANDOM one; an Omen of Whittling (removes the lowest mod) or "
+                      "Sinistral/Dextral Erasure (removes only a prefix/suffix) biases "
+                      "WHICH side is hit but not the result. A Perfect Essence removes a "
+                      "random mod and adds this one guaranteed. All can destroy a mod you "
+                      "wanted to keep — the trap to avoid for a small gain.",
         })
         methods.append({
             "method": "Replace the item",
             "risk": "medium",
-            "detail": f"Often the realistic SSF move: find/craft a fresh {rec['name']} "
-                      f"that already rolls {target} alongside your other needed mods, "
-                      "rather than risking the current one.",
+            "detail": f"Usually the realistic move: buy via trade, or craft a fresh "
+                      f"{rec['name']} (essence-guarantee {target}, then Exalt/Regal the "
+                      "rest) that rolls it alongside your other needed mods, rather than "
+                      "risking the current one.",
         })
 
     return methods
