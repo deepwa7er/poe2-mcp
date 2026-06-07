@@ -405,10 +405,16 @@ def get_skills() -> list[dict]:
         are the gems worth raising via higher uncut gems.
     Never quote a support's mechanical strength from this field; get the numbers
     from get_skill_details instead.
+
+    Each group also carries `suggested_supports`: up to three of the strongest
+    support gems NOT already socketed there (penetration / more-damage only,
+    build-aware), as "Name — why" hints. It's a quick pointer; call
+    recommend_supports for the full bucketed list with conditional/utility options.
     """
     build = _require_build()
-    return [
-        {
+    out = []
+    for group in build.socket_groups:
+        entry = {
             "slot": group.slot,
             "active_skill": group.active_skill,
             "enabled": group.enabled,
@@ -424,8 +430,13 @@ def get_skills() -> list[dict]:
                 for gem in group.gems
             ],
         }
-        for group in build.socket_groups
-    ]
+        rec = _recommend_for_group(build, group)
+        if rec is not None:
+            hint = _top_support_hint(rec)
+            if hint:
+                entry["suggested_supports"] = hint
+        out.append(entry)
+    return out
 
 
 @mcp.tool()
@@ -624,68 +635,27 @@ def _classify_support(gem: dict, dims: set[str], elements: set[str], tags: set[s
             "key_stats": key_stats, "note": note}
 
 
-@mcp.tool()
-def recommend_supports(skill=None, include_inapplicable: bool = False) -> dict:
-    """
-    Recommend support gems for one of the loaded build's skills, ranked and bucketed.
-
-    THIS is the discovery counterpart to get_skill_details (which only looks a gem up
-    by name). It scans every support in the gem database, keeps the ones compatible
-    with the chosen skill's tags, and buckets each by what it actually does — so you
-    recommend specific gems instead of guessing names, and you can tell the user which
-    MODIFIER TYPE to look for.
-
-    skill — 1-based socket-group index, or an active skill name (e.g. "Firestorm");
-            defaults to the first enabled group. See get_skills / list_skill_groups.
-    include_inapplicable — also return supports whose payload does nothing for this
-            skill (wrong damage type, ailment the skill can't inflict). Off by default.
-
-    Build-aware: a multiplier counts only if the skill scales that damage dimension
-    (a physical "more" does nothing on a fire spell), penetration is matched to an
-    element the skill deals and annotated with the enemy's resistance from the build's
-    Config, and supports already socketed in the group are flagged, not re-suggested.
-
-    Returns buckets — penetration, generic_more (unconditional more-damage),
-    conditional (ailment/stun/low-life/charge-gated), utility — each a list of
-    {name, tier_of (best tier in family), score, mana_multiplier, key_stats, note,
-    already_equipped}. Read `note`/`key_stats`, not raw `score`, when comparing across
-    buckets — a conditional's big number only pays out if you build for it.
-    """
-    build = _require_build()
+def _recommend_for_group(build, group, include_inapplicable: bool = False) -> dict | None:
+    """Bucketed support recommendations for an already-resolved socket group, or None
+    if the gem database is absent or the group's active gem isn't in it. Shared by
+    recommend_supports (full output) and get_skills (a short hint per group)."""
     if _gems is None:
-        return {"error": "Gem database not loaded."}
-
-    # Resolve the skill argument to a socket group from the build (no engine needed).
-    groups = [g for g in build.socket_groups]
-    group = None
-    if skill is None:
-        group = next((g for g in groups if g.enabled), groups[0] if groups else None)
-    elif isinstance(skill, int):
-        if 1 <= skill <= len(groups):
-            group = groups[skill - 1]
-    else:
-        q = str(skill).strip().lower()
-        group = (next((g for g in groups if (g.active_skill or "").lower() == q), None)
-                 or next((g for g in groups if q in (g.active_skill or "").lower()), None))
-    if group is None:
-        return {"error": f"no skill group matches {skill!r}. "
-                         f"Available: {[g.active_skill for g in groups]}"}
-
+        return None
     active = next((g for g in group.gems if g.is_active), None)
     if active is None:
-        return {"error": f"group {group.active_skill!r} has no active skill gem."}
+        return None
     info = _gems.get(active.skill_id or active.name)
     if info is None:
-        return {"error": f"{active.name!r} not found in the gem database."}
+        return None
 
     tags = set(info.get("skill_types") or [])
     dims = _skill_damage_dims(tags)
     elements = {e for e in ("fire", "cold", "lightning", "chaos") if e in dims}
     equipped = {g.name.lower() for g in group.gems if not g.is_active}
-    # Collapse a support family to its best (highest-score) tier so we suggest the
-    # upgrade target once, not "Fire Penetration I" and "II" as separate lines.
     enemy_cfg = (build.config or {}).get("placeholders", {})
 
+    # Collapse a support family to its best (highest-score) tier so we suggest the
+    # upgrade target once, not "Fire Penetration I" and "II" as separate lines.
     by_family: dict[str, dict] = {}
     singles: list[dict] = []
     for gem in _gems.supports_for(tags):
@@ -737,6 +707,71 @@ def recommend_supports(skill=None, include_inapplicable: bool = False) -> dict:
                 "large number only pays out if the build scales that ailment/condition. "
                 "Set include_inapplicable=true to see gems that do nothing here.",
     }
+
+
+def _top_support_hint(rec: dict, limit: int = 3) -> list[str]:
+    """A short 'why' list of the strongest *not-yet-socketed* damage supports — the
+    penetration and generic_more buckets only — for inline display in get_skills."""
+    picks = [r for b in ("penetration", "generic_more")
+             for r in rec["buckets"][b] if not r["already_equipped"]]
+    picks.sort(key=lambda r: (r["bucket"] != "penetration", -r["score"]))
+    return [f"{r['name']} — {r['note']}" for r in picks[:limit]]
+
+
+@mcp.tool()
+def recommend_supports(skill=None, include_inapplicable: bool = False) -> dict:
+    """
+    Recommend support gems for one of the loaded build's skills, ranked and bucketed.
+
+    THIS is the discovery counterpart to get_skill_details (which only looks a gem up
+    by name). It scans every support in the gem database, keeps the ones compatible
+    with the chosen skill's tags, and buckets each by what it actually does — so you
+    recommend specific gems instead of guessing names, and you can tell the user which
+    MODIFIER TYPE to look for.
+
+    skill — 1-based socket-group index, or an active skill name (e.g. "Firestorm");
+            defaults to the first enabled group. See get_skills / list_skill_groups.
+    include_inapplicable — also return supports whose payload does nothing for this
+            skill (wrong damage type, ailment the skill can't inflict). Off by default.
+
+    Build-aware: a multiplier counts only if the skill scales that damage dimension
+    (a physical "more" does nothing on a fire spell), penetration is matched to an
+    element the skill deals and annotated with the enemy's resistance from the build's
+    Config, and supports already socketed in the group are flagged, not re-suggested.
+
+    Returns buckets — penetration, generic_more (unconditional more-damage),
+    conditional (ailment/stun/low-life/charge-gated), utility — each a list of
+    {name, tier_of (best tier in family), score, mana_multiplier, key_stats, note,
+    already_equipped}. Read `note`/`key_stats`, not raw `score`, when comparing across
+    buckets — a conditional's big number only pays out if you build for it.
+    """
+    build = _require_build()
+    if _gems is None:
+        return {"error": "Gem database not loaded."}
+
+    # Resolve the skill argument to a socket group from the build (no engine needed).
+    groups = [g for g in build.socket_groups]
+    group = None
+    if skill is None:
+        group = next((g for g in groups if g.enabled), groups[0] if groups else None)
+    elif isinstance(skill, int):
+        if 1 <= skill <= len(groups):
+            group = groups[skill - 1]
+    else:
+        q = str(skill).strip().lower()
+        group = (next((g for g in groups if (g.active_skill or "").lower() == q), None)
+                 or next((g for g in groups if q in (g.active_skill or "").lower()), None))
+    if group is None:
+        return {"error": f"no skill group matches {skill!r}. "
+                         f"Available: {[g.active_skill for g in groups]}"}
+
+    active = next((g for g in group.gems if g.is_active), None)
+    if active is None:
+        return {"error": f"group {group.active_skill!r} has no active skill gem."}
+    rec = _recommend_for_group(build, group, include_inapplicable)
+    if rec is None:
+        return {"error": f"{active.name!r} not found in the gem database."}
+    return rec
 
 
 @mcp.tool()

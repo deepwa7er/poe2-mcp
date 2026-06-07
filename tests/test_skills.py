@@ -196,6 +196,36 @@ def test_classify_ignore_resistance_flag():
     assert res["score"] > 100 and "IGNORE" in res["note"]
 
 
+def test_top_support_hint_prioritises_pen_and_skips_equipped():
+    from poe2_mcp.server import _top_support_hint
+    rec = {"buckets": {
+        "penetration": [
+            {"name": "Fire Penetration II", "score": 999, "note": "ignore fire res",
+             "bucket": "penetration", "already_equipped": False},
+        ],
+        "generic_more": [
+            {"name": "Considered Casting", "score": 35, "note": "more spell",
+             "bucket": "generic_more", "already_equipped": True},   # equipped → skip
+            {"name": "Concentrated Area", "score": 30, "note": "more area",
+             "bucket": "generic_more", "already_equipped": False},
+            {"name": "Controlled Destruction", "score": 25, "note": "more spell",
+             "bucket": "generic_more", "already_equipped": False},
+            {"name": "Elemental Focus", "score": 25, "note": "more ele",
+             "bucket": "generic_more", "already_equipped": False},
+        ],
+        "conditional": [{"name": "Ignite III", "score": 200, "note": "x",
+                         "bucket": "conditional", "already_equipped": False}],
+        "utility": [],
+    }}
+    hint = _top_support_hint(rec)
+    # Penetration first, equipped skipped, conditional/utility never included, capped at 3.
+    assert hint == [
+        "Fire Penetration II — ignore fire res",
+        "Concentrated Area — more area",
+        "Controlled Destruction — more spell",
+    ]
+
+
 def test_classify_buckets_and_scope():
     from poe2_mcp.server import _classify_support, _skill_damage_dims
     fire_tags = {"Spell", "Fire", "Area"}
