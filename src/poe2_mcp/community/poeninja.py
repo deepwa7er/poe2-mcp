@@ -293,8 +293,13 @@ def fetch_character_export(account: str, name: str) -> str:
         return fetch_pob_export(slug, name, league=league)
     except httpx.HTTPStatusError as e:
         if e.response is not None and e.response.status_code == 404:
+            lvl = match.get("level")
+            lvl_hint = f" (level {lvl})" if lvl else ""
             raise ValueError(
-                f"poe.ninja has no build snapshot for {name!r} (league {league!r}) — it is likely "
-                "not on the current ladder. Export it from Path of Building to analyse this one."
+                f"poe.ninja has no build snapshot for {name!r}{lvl_hint} in league {league!r}. "
+                "poe.ninja only snapshots a character's full build once it passes a level "
+                "threshold, so lower-level characters aren't yet available even on the current "
+                "ladder (this is not an SSF limitation — higher-level SSF characters do load). "
+                "Export it from Path of Building to analyse this one now."
             ) from e
         raise

@@ -13,7 +13,7 @@ return node IDs only.
 import json
 import os
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 
@@ -27,6 +27,12 @@ class TreeNode:
     is_mastery: bool = False
     ascendancy_name: str = ""
     neighbors: list[int] = field(default_factory=list)
+    # Per-class node overrides: class/ascendancy name -> {"name", "stats"}.
+    # Two PoE2 classes share each attribute start (e.g. Witch+Sorceress), and the
+    # nodes near that start differ per class — the same node id renders as a
+    # different name/stats depending on which of the pair you are. Empty for the
+    # ~99% of nodes that are class-agnostic.
+    options: dict[str, dict] = field(default_factory=dict)
 
 
 class PassiveTree:
@@ -35,38 +41,95 @@ class PassiveTree:
         nodes: dict[int, TreeNode],
         voronoi: dict[int, str] | None = None,
         class_start_ids: dict[str, int] | None = None,
+        class_aliases: dict[str, set[str]] | None = None,
     ):
         self._nodes = nodes
         self._voronoi: dict[int, str] = voronoi or {}
         self.class_start_ids: dict[str, int] = class_start_ids or {}
+        # class name -> all classes sharing its start node (incl. itself). Paired
+        # classes (Witch/Sorceress, Ranger/Huntress) occupy the same tree region,
+        # so a region filter for one must also accept the other.
+        self._class_aliases: dict[str, set[str]] = class_aliases or {}
 
     def get(self, node_id: int) -> TreeNode | None:
         return self._nodes.get(node_id)
 
-    def resolve_ids(self, ids: list[int]) -> list[TreeNode]:
-        return [self._nodes[i] for i in ids if i in self._nodes]
+    def view(
+        self,
+        node: TreeNode | int | None,
+        class_name: str | None = None,
+        ascendancy: str | None = None,
+    ) -> TreeNode | None:
+        """Resolve a node's name/stats for a given class.
+
+        Most nodes are class-agnostic and are returned unchanged. For the handful
+        of switchable start-area nodes, the variant for `ascendancy` (e.g. Abyssal
+        Lich) takes priority, then `class_name` (e.g. Witch); otherwise the default
+        (which serves the paired class, e.g. Sorceress) is returned.
+        """
+        if isinstance(node, int):
+            node = self._nodes.get(node)
+        if node is None or not node.options:
+            return node
+        for key in (ascendancy, class_name):
+            if key and key in node.options:
+                ov = node.options[key]
+                return replace(node, name=ov["name"], stats=ov["stats"])
+        return node
+
+    def resolve_ids(
+        self,
+        ids: list[int],
+        class_name: str | None = None,
+        ascendancy: str | None = None,
+    ) -> list[TreeNode]:
+        return [
+            self.view(self._nodes[i], class_name, ascendancy)
+            for i in ids
+            if i in self._nodes
+        ]
 
     def region_of(self, node_id: int) -> str:
         """Return the class name this node belongs to in the Voronoi partition, or '' if unknown."""
         return self._voronoi.get(node_id, "")
 
+    def expand_classes(self, classes: list[str]) -> set[str]:
+        """Expand requested class names to include classes sharing the same start.
+
+        Filtering by "Sorceress" should also match the "Witch" Voronoi label (they
+        share a region), and vice versa.
+        """
+        out: set[str] = set()
+        for c in classes:
+            out |= self._class_aliases.get(c, {c})
+        return out
+
     def class_names(self) -> list[str]:
         """Return all PoE2 class names derived from the tree data."""
         return sorted(self.class_start_ids.keys())
 
-    def search(self, query: str, classes: list[str] | None = None) -> list[TreeNode]:
+    def search(
+        self,
+        query: str,
+        classes: list[str] | None = None,
+        class_name: str | None = None,
+        ascendancy: str | None = None,
+    ) -> list[TreeNode]:
         """Return all nodes whose name or stats contain the query string (case-insensitive).
 
-        If classes is provided, only nodes belonging to those Voronoi regions are returned.
+        Matching is done against each node's class-resolved content (so a Witch
+        search for "chaos" matches the Witch variant, not the default). If classes
+        is provided, only nodes in those Voronoi regions (alias-expanded) are returned.
         """
         q = query.lower()
-        results = [
-            node for node in self._nodes.values()
-            if q in node.name.lower() or any(q in s.lower() for s in node.stats)
-        ]
-        if classes:
-            class_set = set(classes)
-            results = [n for n in results if self._voronoi.get(n.id, "") in class_set]
+        region_filter = self.expand_classes(classes) if classes else None
+        results: list[TreeNode] = []
+        for node in self._nodes.values():
+            if region_filter is not None and self._voronoi.get(node.id, "") not in region_filter:
+                continue
+            v = self.view(node, class_name, ascendancy)
+            if q in v.name.lower() or any(q in s.lower() for s in v.stats):
+                results.append(v)
         return results
 
     def neighbor_nodes(self, node_id: int) -> list[TreeNode]:
@@ -212,13 +275,24 @@ def load_tree(path: str | Path) -> PassiveTree:
     Connections in the raw JSON are directed edges; we build a bidirectional
     adjacency list so BFS can traverse the graph in either direction.
 
-    Class starting nodes are identified via the classesStart field. The last
-    entry in that array is the PoE2 class name (e.g. ["Shadow", "Monk"] → Monk).
-    A Voronoi partition is computed after adjacency is built, assigning every
-    node to the class whose starting node is closest in graph distance.
+    Class starting nodes are identified via the classesStart field, which lists the
+    classes that share that start (e.g. ["Witch", "Sorceress"]). Every entry that
+    is a real PoE2 class (per the top-level "classes" table) is registered, so all
+    8 classes are recognised — not just one per attribute corner. Legacy PoE1 names
+    (Shadow, Marauder, Duelist, Templar) are skipped. A Voronoi partition is computed
+    after adjacency is built, assigning every node to the class whose starting node
+    is closest in graph distance.
+
+    Per-class node variants are read from each node's "options": when it is a dict
+    keyed by class/ascendancy name, that class sees a different name/stats for the
+    same node id (e.g. Witch sees "Entropy" where others see "Principal Infusion").
+    List-typed "options" are the +5-attribute choice nodes and are left as-is.
     """
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+
+    # Real PoE2 class names, used to filter legacy aliases out of classesStart.
+    real_classes = {c["name"] for c in data.get("classes", []) if c.get("name")}
 
     nodes_raw = data.get("nodes", {})
     nodes: dict[int, TreeNode] = {}
@@ -242,6 +316,17 @@ def load_tree(path: str | Path) -> PassiveTree:
         is_mastery = val.get("isMastery", False)
         ascendancy_name = val.get("ascendancyName", "")
 
+        # Per-class overrides: only the dict form (class name -> {name, stats}).
+        options: dict[str, dict] = {}
+        raw_opts = val.get("options")
+        if isinstance(raw_opts, dict):
+            for cname, ov in raw_opts.items():
+                if isinstance(ov, dict) and "name" in ov:
+                    options[cname] = {
+                        "name": ov.get("name", name),
+                        "stats": ov.get("stats", stats),
+                    }
+
         nodes[node_id] = TreeNode(
             id=node_id,
             name=name,
@@ -250,12 +335,19 @@ def load_tree(path: str | Path) -> PassiveTree:
             is_notable=is_notable,
             is_mastery=is_mastery,
             ascendancy_name=ascendancy_name,
+            options=options,
         )
 
-        # The last entry in classesStart is the PoE2 class name.
+        # Register every real PoE2 class that starts here. Fall back to the legacy
+        # "[-1] is the PoE2 class" rule when no classes table is present.
         classes_start = val.get("classesStart", [])
         if classes_start:
-            class_start_ids[classes_start[-1]] = node_id
+            if real_classes:
+                for cname in classes_start:
+                    if cname in real_classes:
+                        class_start_ids[cname] = node_id
+            else:
+                class_start_ids[classes_start[-1]] = node_id
 
     # Second pass: build bidirectional adjacency from the directed connection list.
     for key, val in nodes_raw.items():
@@ -277,7 +369,29 @@ def load_tree(path: str | Path) -> PassiveTree:
                 nodes[dst_id].neighbors.append(src_id)
 
     voronoi = _compute_voronoi(nodes, class_start_ids)
-    return PassiveTree(nodes, voronoi=voronoi, class_start_ids=class_start_ids)
+    class_aliases = _compute_class_aliases(class_start_ids)
+    return PassiveTree(
+        nodes,
+        voronoi=voronoi,
+        class_start_ids=class_start_ids,
+        class_aliases=class_aliases,
+    )
+
+
+def _compute_class_aliases(class_start_ids: dict[str, int]) -> dict[str, set[str]]:
+    """Group classes that share a start node (e.g. {Witch, Sorceress}).
+
+    Returns each class -> the full set sharing its start, so a region filter for
+    one paired class also matches its partner's Voronoi label.
+    """
+    by_start: dict[int, set[str]] = {}
+    for cname, start_id in class_start_ids.items():
+        by_start.setdefault(start_id, set()).add(cname)
+    aliases: dict[str, set[str]] = {}
+    for names in by_start.values():
+        for n in names:
+            aliases[n] = set(names)
+    return aliases
 
 
 _default_path = Path(__file__).parent.parent.parent.parent / "data" / "poe2_tree.json"

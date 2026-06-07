@@ -122,5 +122,5 @@ def test_fetch_character_export_not_indexed(monkeypatch):
         raise httpx.HTTPStatusError("not found", request=req, response=resp)
 
     monkeypatch.setattr(poeninja, "fetch_pob_export", _raise_404)
-    with pytest.raises(ValueError, match="not on the current ladder"):
+    with pytest.raises(ValueError, match="passes a level threshold"):
         poeninja.fetch_character_export("methanman#2640", "pingkong")
