@@ -403,6 +403,13 @@ def get_skills() -> list[dict]:
         you swap it for a higher tier, you do not level it.
       - For ACTIVE skill gems, `level` IS meaningful and scales the skill — those
         are the gems worth raising via higher uncut gems.
+      - `quality` (0–20) CAN be raised on skill gems — Gemcutter's Prism exists in
+        PoE2 and adds 1% per use up to 20% (don't tell the user it's impossible).
+        BUT quality is NOT a blanket damage lever: what it does is PER GEM. Many
+        actives give area/duration/utility per quality, not damage (e.g. Firestorm
+        quality is AoE radius). NEVER recommend quality as a damage upgrade without
+        first reading that gem's `quality_stats` from get_skill_details to confirm
+        the payload is actually damage.
     Never quote a support's mechanical strength from this field; get the numbers
     from get_skill_details instead.
 
@@ -482,7 +489,12 @@ def get_skill_details(query: str) -> dict:
       - "base_..."                    → a flat/base value (e.g. base_reduce_enemy_
         fire_resistance_% 30 = 30 points of penetration).
       - quality_stats values are PER POINT of gem quality (multiply by the gem's
-        quality %); they are deliberately NOT merged into stats.
+        quality %); they are deliberately NOT merged into stats. Gem quality IS
+        raisable in PoE2 (Gemcutter's Prism, 1% per use to 20%) — but whether it's
+        worth it is decided HERE: read quality_stats to see what the gem's quality
+        actually does. It is frequently area/duration/utility, not damage (e.g.
+        Firestorm's quality is AoE radius), so do not call quality a damage upgrade
+        unless quality_stats shows a damage/penetration/cast-speed payload.
       - mana_multiplier N             → +N% to the supported skill's mana cost
         (total ×(1+N/100)); negative reduces it.
       - requires / excludes_skill_types may contain "AND"/"OR" — PoB logical
