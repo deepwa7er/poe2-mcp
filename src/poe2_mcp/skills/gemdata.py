@@ -100,6 +100,31 @@ class GemData:
             out.append(self._enrich(sid))
         return out
 
+    def active_skills_for(self, tags, match: str = "all") -> list[dict]:
+        """Every socketable ACTIVE (non-support) skill whose skill_types match `tags`,
+        enriched. match="all" (default) requires every tag (e.g. {"Fire","Spell"} →
+        fire spells); "any" requires at least one. Drops supports and gems you cannot
+        obtain as a socketable gem (hidden/legacy/from_item/from_tree).
+
+        This is the discovery path for skills a build does NOT currently use — the
+        active skill itself is an upgrade lever, not just its supports. supports_for is
+        the support-gem counterpart; this is the active-skill one."""
+        want = set(tags)
+        out: list[dict] = []
+        for sid, s in self._skills.items():
+            if s.get("is_support"):
+                continue
+            if any(s.get(k) for k in ("hidden", "legacy", "from_item", "from_tree")):
+                continue
+            types = set(s.get("skill_types") or [])
+            if match == "any":
+                if not (want & types):
+                    continue
+            elif not want <= types:
+                continue
+            out.append(self._enrich(sid))
+        return out
+
     def _enrich(self, skill_id: str) -> dict:
         s = dict(self._skills[skill_id])
         s["skill_id"] = skill_id

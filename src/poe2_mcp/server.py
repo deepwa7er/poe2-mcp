@@ -417,6 +417,14 @@ def get_skills() -> list[dict]:
     support gems NOT already socketed there (penetration / more-damage only,
     build-aware), as "Name — why" hints. It's a quick pointer; call
     recommend_supports for the full bucketed list with conditional/utility options.
+
+    These are the build's CURRENT skills — do not treat them as the only options when
+    asked how to improve the build. The active skill itself is an upgrade lever: a
+    different skill may out-perform the equipped one for the goal (e.g. boss damage).
+    When advising on improvements, call discover_skills to enumerate alternative active
+    skills the build does NOT have (it defaults to "skills like the current one" — same
+    element/delivery, so they reuse existing scaling). Don't recall candidate skill
+    names from memory; discover_skills is the source of truth for what exists.
     """
     build = _require_build()
     out = []
@@ -784,6 +792,125 @@ def recommend_supports(skill=None, include_inapplicable: bool = False) -> dict:
     if rec is None:
         return {"error": f"{active.name!r} not found in the gem database."}
     return rec
+
+
+def _derive_skill_tags(skill_types) -> list[str]:
+    """Reduce a skill's full skill_types to the discovery-relevant subset: its damage
+    element(s) plus its delivery (Spell/Attack). Using every tag would over-constrain
+    a match=all search (few skills are Fire AND Projectile AND Area AND Duration); the
+    element + delivery is the pool that reuses the build's existing damage scaling."""
+    tags = set(skill_types or [])
+    out = [el for el in ("Fire", "Cold", "Lightning", "Chaos", "Physical") if el in tags]
+    delivery = "Spell" if "Spell" in tags else ("Attack" if "Attack" in tags else None)
+    if delivery:
+        out.append(delivery)
+    return out
+
+
+@mcp.tool()
+def discover_skills(skill=None, tags=None, match: str = "all", limit: int = 30) -> dict:
+    """
+    Discover ACTIVE skill gems the build could switch to — INCLUDING skills it does
+    not currently use.
+
+    Build improvement is NOT limited to the equipped skill and its supports: the
+    active skill itself is an upgrade lever. recommend_supports only ranks supports for
+    a skill you already have; THIS scans the gem database for alternative active skills,
+    so when asked to improve damage you can evaluate a better main/boss skill instead of
+    assuming the socketed one is fixed. Reach for this whenever you assess how to make a
+    build stronger — don't answer from only the equipped skills.
+
+    skill — reference socket group (1-based index or active skill name) whose element +
+            delivery seed the search; defaults to the first enabled group. Ignored when
+            `tags` is given.
+    tags  — explicit skill_type filter (e.g. ["Fire", "Spell"]). Overrides `skill`.
+    match — "all" (default): a skill must have every tag; "any": at least one.
+    limit — cap on returned skills (default 30).
+
+    Default behaviour finds "skills like my current one" — the same element and
+    Spell/Attack delivery — i.e. the pool that reuses the build's penetration, %-damage
+    and infusion investment. Widen with tags=["Fire"] match="any" to see every fire
+    skill regardless of delivery, or pass an off-element tag to scope a larger rework.
+
+    Each entry: {name, description, skill_types, cast_time, spirit_reservation,
+    reserves_spirit, already_used (true if socketed in the loaded build)}. Read the
+    description for the mechanic, then confirm a candidate's numbers with
+    get_skill_details before recommending it. Excludes supports and skills you cannot
+    socket as a gem (hidden/legacy/granted-by-item/granted-by-tree).
+    """
+    if _gems is None:
+        return {"error": "Gem database not loaded."}
+    if match not in ("all", "any"):
+        return {"error": "match must be 'all' or 'any'."}
+
+    try:
+        build = _require_build()
+    except Exception:
+        build = None
+
+    used_ids: set[str] = set()
+    used_names: set[str] = set()
+    if build is not None:
+        for g in build.socket_groups:
+            for gem in g.gems:
+                if gem.is_active:
+                    used_names.add((gem.name or "").lower())
+                    if gem.skill_id:
+                        used_ids.add(gem.skill_id)
+
+    seed = None
+    if tags is None:
+        if build is None:
+            return {"error": "no tags given and no build loaded; pass tags=[...] "
+                             "(e.g. [\"Fire\", \"Spell\"])."}
+        groups = list(build.socket_groups)
+        group = None
+        if skill is None:
+            group = next((g for g in groups if g.enabled), groups[0] if groups else None)
+        elif isinstance(skill, int):
+            group = groups[skill - 1] if 1 <= skill <= len(groups) else None
+        else:
+            q = str(skill).strip().lower()
+            group = (next((g for g in groups if (g.active_skill or "").lower() == q), None)
+                     or next((g for g in groups if q in (g.active_skill or "").lower()), None))
+        if group is None:
+            return {"error": f"no skill group matches {skill!r}. "
+                             f"Available: {[g.active_skill for g in groups]}"}
+        active = next((g for g in group.gems if g.is_active), None)
+        info = _gems.get(active.skill_id or active.name) if active else None
+        if info is None:
+            return {"error": f"reference skill {group.active_skill!r} not in the gem database; "
+                             "pass tags=[...] explicitly."}
+        seed = group.active_skill
+        tags = _derive_skill_tags(info.get("skill_types"))
+        if not tags:
+            return {"error": f"could not derive element/delivery tags from {seed!r}; "
+                             "pass tags=[...] explicitly."}
+
+    rows = []
+    for s in _gems.active_skills_for(tags, match=match):
+        rows.append({
+            "name": s.get("name"),
+            "description": s.get("description"),
+            "skill_types": s.get("skill_types") or [],
+            "cast_time": s.get("cast_time"),
+            "spirit_reservation": s.get("spirit_reservation", 0),
+            "reserves_spirit": s.get("reserves_spirit", False),
+            "already_used": (s.get("skill_id") in used_ids
+                             or (s.get("name") or "").lower() in used_names),
+        })
+    # Surface skills you don't already run first, then alphabetical for stability.
+    rows.sort(key=lambda r: (r["already_used"], r["name"] or ""))
+    return {
+        "filter_tags": list(tags),
+        "match": match,
+        "seed_skill": seed,
+        "count": len(rows),
+        "skills": rows[:limit],
+        "note": "These are alternative ACTIVE skills, not supports. The active skill is "
+                "itself an upgrade lever — evaluate swapping it, don't assume it's fixed. "
+                "Confirm a candidate's mechanics with get_skill_details before recommending.",
+    }
 
 
 @mcp.tool()
