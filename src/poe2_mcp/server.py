@@ -425,6 +425,18 @@ def get_skills() -> list[dict]:
     skills the build does NOT have (it defaults to "skills like the current one" — same
     element/delivery, so they reuse existing scaling). Don't recall candidate skill
     names from memory; discover_skills is the source of truth for what exists.
+
+    Always weigh BOTH gameplay modes. A character plays two ways — mapping/clear (many
+    weak enemies: AoE, speed, chaining, on-kill effects) and single-target/boss (one
+    durable enemy: sustained single-target, penetration, burst) — and they trade off.
+    A single-target pick can gut clear; a boss nuke can clear poorly; a gem, reservation
+    or node that does nothing for the boss skill may be load-bearing for the clear skill
+    (and vice-versa). Never call something "dead weight" or judge a change from one mode
+    alone: before dropping it, confirm it isn't carrying the OTHER mode, and when you
+    recommend, state the effect on clear AND on single-target. "Focusing on boss damage"
+    never means the user only fights bosses — they still spend most of their time
+    clearing trash. Builds commonly run a separate clear skill and boss skill; a swap may
+    fill only one role.
     """
     build = _require_build()
     out = []
@@ -725,7 +737,11 @@ def _recommend_for_group(build, group, include_inapplicable: bool = False) -> di
         "buckets": buckets,
         "note": "Compare by `note`/`key_stats`, not raw `score`: a conditional bucket's "
                 "large number only pays out if the build scales that ailment/condition. "
-                "Set include_inapplicable=true to see gems that do nothing here.",
+                "Set include_inapplicable=true to see gems that do nothing here. "
+                "Supports trade clear for single-target — e.g. Concentrated Area boosts "
+                "single-target but shrinks clear AoE. Note that tradeoff when recommending: "
+                "don't push a single-target support without flagging its clear cost, or a "
+                "clear/AoE support without flagging weaker bossing.",
     }
 
 
@@ -909,7 +925,12 @@ def discover_skills(skill=None, tags=None, match: str = "all", limit: int = 30) 
         "skills": rows[:limit],
         "note": "These are alternative ACTIVE skills, not supports. The active skill is "
                 "itself an upgrade lever — evaluate swapping it, don't assume it's fixed. "
-                "Confirm a candidate's mechanics with get_skill_details before recommending.",
+                "Confirm a candidate's mechanics with get_skill_details before recommending. "
+                "A skill's value differs hugely by mode: a boss nuke (channelled/staged "
+                "burst) often clears poorly and a fast clearer is weak single-target. Say "
+                "how a candidate performs for BOTH mapping and bossing, and whether it "
+                "replaces the current skill in both roles or just one — builds usually keep "
+                "a separate clear skill and boss skill.",
     }
 
 
