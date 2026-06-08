@@ -55,7 +55,83 @@ from .vendor_regex import (
     slot_key as _vendor_slot_key,
 )
 
-mcp = FastMCP("poe2-mcp")
+_BUILD_REVIEW_GUIDANCE = """\
+poe2-mcp inspects a Path of Building 2 character. When you REVIEW or critique a
+build with these tools, run the review in this ORDER, then follow the PRINCIPLES.
+They encode how PoE2 actually works and head off common PoE1-brained mistakes.
+
+REVIEW STRUCTURE — produce the sections in this order:
+
+  0. Identify the build FIRST. Infer the archetype and win condition from the
+     kit, passive tree, ascendancy and items (e.g. "ignite fire caster", "minion
+     summoner", "crit lightning attacks", "ES-stacking spellcaster"). If it is
+     genuinely ambiguous which build the user is running — several damage axes
+     half-invested with no clear main, or a tree that points one way while the
+     skills point another — ASK a clarifying question before analysing rather
+     than guessing.
+
+  1. SYNERGY ANALYSIS — the most important section, lead with it. Map how the
+     pieces interact across ALL of: passive tree notables, ascendancy nodes,
+     active skill gems, support gems, and spirit-reserved skills ("spirit gems":
+     heralds, auras, persistent buffs, minions, meta/trigger gems like Cast on
+     Elemental Ailment — see get_spirit_reservation). State plainly which pieces
+     SYNERGISE (push the same damage type / ailment / scaling axis / defensive
+     layer) and which DON'T — a tree invested in an axis the skills and supports
+     don't use (e.g. ignite/Bringer-of-Flame nodes while the skills scale hit and
+     ignite DPS is ~0) is dead investment and is the single highest-value finding.
+
+  2. RECOMMENDATIONS for pieces the build does NOT currently have but that would
+     synergise with what it does — across passives, skill gems, support gems and
+     spirit gems. Make them concrete swaps wherever possible: "remove X, take Y
+     instead." Use path_to_node / get_reachable_nodes / search_tree for tree
+     moves, discover_skills / recommend_supports for gems. Respect the PRINCIPLES
+     below (supports are craftable copies; gear is packages).
+
+  3. Then DEFENSES and DPS-per-skill (see principle 4), and any cleanup
+     (empty sockets, duplicate/leftover gems, wasted spirit).
+
+  4. LAST, and only last: off-build / suboptimal GEAR affixes. You MAY note they
+     exist (e.g. "this amulet's crit roll does little for a non-crit build"), but
+     only here at the end, framed as criteria for the next item — never woven
+     through earlier sections, never as "remove modifier X" (see principle 3).
+
+PRINCIPLES:
+
+1. A build is a KIT of skills, not one skill. Running several active damage
+   skills at once is normal and intended: a character swaps between a clear
+   skill (many weak enemies) and a single-target/boss skill, plus utility
+   (walls, curses, minions, movement) that combos with them — e.g. Firebolt
+   cast through Flame Wall for added fire. Never call a multi-skill setup
+   "sprawl", never tell the user to collapse the kit down to one skill, and
+   judge each skill in its role rather than against the others.
+
+2. Support gems are NOT a scarce shared pool. In PoE2 you can craft unlimited
+   copies of any support gem, so every skill in the kit can be fully and
+   independently supported. Never advise "moving" or "reallocating" a support
+   from one skill to another, and never say supports are "spread thin." If a
+   skill lacks a strong support, the fix is simply to add/craft it.
+
+3. Gear is acquired as whole packages and is imperfect — especially while
+   levelling. You cannot remove or cherry-pick a single modifier off a rare.
+   Never advise "remove/drop modifier X" from an item. An off-build affix (e.g.
+   crit on a non-crit build) is normal, not a defect to fix. Frame gear upgrades
+   as criteria for the NEXT item that fills a slot ("when you replace these
+   gloves, look for ..."), and weight advice by how realistic the upgrade is at
+   the character's level.
+
+4. Don't reduce a kit build to a single DPS number. get_stats reports the
+   active skill under the saved config — one tool in the kit, often not the boss
+   nuke. Identify which skill a figure measures and its role before judging it;
+   use list_skill_groups + compare_dps per skill instead of declaring "your DPS
+   is X" from one value. Read get_config first — the number already bakes in
+   enemy/charge/ailment assumptions.
+
+5. Separate levelling from endgame. Below the endgame a build is in progress;
+   advice should set direction and priorities, not demand a fully optimised,
+   perfectly itemised character.
+"""
+
+mcp = FastMCP("poe2-mcp", instructions=_BUILD_REVIEW_GUIDANCE)
 
 # Module-level state — single-user personal tool, single process
 _build: Build | None = None
@@ -148,6 +224,12 @@ def get_stats() -> list[dict]:
     Important: these are computed under the build's saved PoB <Config> (enemy
     setup and which conditions/charges are active). DPS in particular reflects
     those assumptions — call get_config to see them before interpreting it.
+
+    DPS here is for the ACTIVE skill only — one tool in a multi-skill kit, often
+    not the boss nuke. Don't reduce a kit build to this single number or declare
+    "your DPS is X" from it: identify which skill it measures and its role
+    (clear vs single-target) first, and use list_skill_groups + compare_dps to
+    read the other skills before judging the build's damage.
     """
     build = _require_build()
     return [{"stat": s.name, "value": s.value} for s in build.stats]
@@ -365,6 +447,15 @@ def get_items() -> list[dict]:
     socketed runes, and the list of mod lines exactly as they appear in the game
     tooltip. implicit_count is how many leading entries in mods are implicit
     (including enchants and rune-granted lines); the remainder are explicit.
+
+    When critiquing gear: items are acquired as whole packages and you CANNOT
+    remove or cherry-pick a single modifier off a rare. Never advise "remove/drop
+    modifier X." An off-build affix (e.g. crit on a non-crit build) is normal,
+    not a defect — especially while levelling. Frame upgrades as criteria for the
+    NEXT item that fills the slot ("when you replace these, look for ..."), and
+    weight advice by how realistic that upgrade is at the character's level. In a
+    full build review, save off-build-affix notes for the END (after synergy,
+    recommendations and defenses) — see the server instructions for review order.
     """
     build = _require_build()
     return [
@@ -437,6 +528,15 @@ def get_skills() -> list[dict]:
     never means the user only fights bosses — they still spend most of their time
     clearing trash. Builds commonly run a separate clear skill and boss skill; a swap may
     fill only one role.
+
+    Two hard rules when CRITIQUING the kit, not just optimising it:
+      - Multiple active damage skills are INTENDED, not "sprawl." A character runs
+        several on purpose (clear / single-target / utility combos). Never advise
+        collapsing the kit to one skill; evaluate each in its role.
+      - Supports are craftable in unlimited copies, so every skill can be fully
+        supported independently. Never advise "moving"/"reallocating" a support
+        between skills, and never say supports are "spread thin." If a skill is
+        missing a strong support, the fix is to add/craft it — full stop.
     """
     build = _require_build()
     out = []
@@ -943,6 +1043,12 @@ def get_spirit_reservation() -> dict:
     list which skills reserve Spirit and their base cost, alongside the build's
     actual Spirit total/reserved/free from its computed stats. Use this to see what
     can be dropped to fit another reservation skill.
+
+    These spirit-reserved skills (heralds, auras, persistent buffs, minions,
+    meta/trigger gems) are the "spirit gems" of a build — include them in the
+    SYNERGY section of a review (see server instructions): check each one buffs the
+    same axis the kit scales, and flag a reservation that costs most of the spirit
+    pool while doing little for the main skills.
 
     Per-skill values are base reservation; spirit_reserved_actual already reflects
     reservation-efficiency modifiers, so the two can differ. Requires a loaded build
