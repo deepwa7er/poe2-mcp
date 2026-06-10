@@ -33,13 +33,20 @@ Tools:
 """
 
 import os
+from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
 
 from .pob import decode_build_code, parse_build_xml, Build
-from .pob.models import Item, SkillGem, SocketGroup, Stat, PassiveNode
+from .pob.models import Item, SocketGroup, PassiveNode
 from .tree import PassiveTree, TreeNode, load_default_tree
-from .skills import GemData, load_default_gem_data
+from .skills import (
+    GemData,
+    load_default_gem_data,
+    derive_skill_tags as _derive_skill_tags,
+    recommend_for_group as _recommend_for_group,
+    top_support_hint as _top_support_hint,
+)
 from .pob_engine import get_engine, PobEngineError, PRESETS
 from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
 from .community import poeninja
@@ -55,6 +62,9 @@ from .vendor_regex import (
     slot_key as _vendor_slot_key,
 )
 
+# NOTE: key principles here are deliberately restated in the get_items/get_skills
+# docstrings (for clients that ignore server instructions) — when editing either
+# copy, keep the other in sync.
 _BUILD_REVIEW_GUIDANCE = """\
 poe2-mcp inspects a Path of Building 2 character. When you REVIEW or critique a
 build with these tools, run the review in this ORDER, then follow the PRINCIPLES.
@@ -133,20 +143,32 @@ PRINCIPLES:
 
 mcp = FastMCP("poe2-mcp", instructions=_BUILD_REVIEW_GUIDANCE)
 
+@dataclass
+class _LoadedBuild:
+    """The active build and the raw XML it was parsed from (the engine recomputes
+    from the XML). One object assigned atomically, so a tool running concurrently
+    with load_build can never see a build paired with another build's XML."""
+    build: Build
+    xml: str
+
+
 # Module-level state — single-user personal tool, single process
-_build: Build | None = None
-_build_xml: str | None = None  # raw XML of the loaded build, for the headless engine
+_loaded: _LoadedBuild | None = None
 _tree: PassiveTree | None = load_default_tree()
 _gems: GemData | None = load_default_gem_data()
 _craft = load_default_craft_data()
 
 
-def _require_build() -> Build:
-    if _build is None:
+def _require_loaded() -> _LoadedBuild:
+    if _loaded is None:
         raise ValueError(
             "No build loaded. Call load_build() first with a PoB export code or pobb.in URL."
         )
-    return _build
+    return _loaded
+
+
+def _require_build() -> Build:
+    return _require_loaded().build
 
 
 # ---------------------------------------------------------------------------
@@ -170,15 +192,15 @@ def load_build(code: str) -> str:
 
 def _load_build_from_xml(xml: str) -> Build:
     """Parse XML into the module-level build, resolving passive names if tree data is present."""
-    global _build, _build_xml, _tree
+    global _loaded, _tree
     if _tree is None:
         _tree = load_default_tree()
-    _build = parse_build_xml(xml)
-    _build_xml = xml  # retained so the headless engine can recompute this build
+    build = parse_build_xml(xml)
     if _tree is not None:
-        cls, asc = _build_class_ctx()
-        _build.passive_nodes = _tree.resolve_ids(_build.allocated_node_ids, cls, asc)
-    return _build
+        cls, asc = (build.class_name or None), (build.ascendancy or None)
+        build.passive_nodes = _tree.resolve_ids(build.allocated_node_ids, cls, asc)
+    _loaded = _LoadedBuild(build=build, xml=xml)
+    return build
 
 
 def _build_class_ctx() -> tuple[str | None, str | None]:
@@ -189,9 +211,10 @@ def _build_class_ctx() -> tuple[str | None, str | None]:
     "Entropy" where a Sorceress sees "Principal Infusion"). Returns (None, None) when
     no build is loaded, which yields the default (class-agnostic) variant.
     """
-    if _build is None:
+    if _loaded is None:
         return None, None
-    return (_build.class_name or None), (_build.ascendancy or None)
+    b = _loaded.build
+    return (b.class_name or None), (b.ascendancy or None)
 
 
 def _loaded_build_summary(source: str = "") -> str:
@@ -292,20 +315,43 @@ def _engine_error(e: PobEngineError) -> dict:
     }
 
 
-def _resolve_skill_group(engine, skill) -> tuple[int | None, str | None]:
+def _resolve_skill_group(engine, xml: str, skill) -> tuple[int | None, str | None]:
     """Resolve a `skill` argument (1-based group index, or skill name) to a group
-    index. Returns (index, None) or (None, error_message)."""
+    index against the ENGINE's socket-group list. Returns (index, None) or
+    (None, error_message). The parser preserves PoB's group order (including
+    gem-less groups), so these indices match _resolve_group_from_build's."""
     if skill is None:
         return None, None
     if isinstance(skill, int):
         return skill, None
-    groups = engine.skill_groups(_build_xml)
+    groups = engine.skill_groups(xml)
     q = str(skill).strip().lower()
     matches = ([g for g in groups if (g.get("skill") or "").lower() == q]
                or [g for g in groups if q in (g.get("skill") or "").lower()])
     if not matches:
         return None, f"no skill group matches {skill!r}. Available: {[g.get('skill') for g in groups]}"
     return matches[0]["index"], None
+
+
+def _resolve_group_from_build(build: Build, skill) -> tuple[SocketGroup | None, str | None]:
+    """Resolve a `skill` argument (1-based group index, skill name, or None for the
+    first enabled group with gems) to one of the build's socket groups. Returns
+    (group, None) or (None, error_message). Shared by every tool that targets a
+    group without the engine, so index/name semantics can't drift between them."""
+    groups = build.socket_groups
+    if skill is None:
+        group = next((g for g in groups if g.enabled and g.gems),
+                     groups[0] if groups else None)
+    elif isinstance(skill, int):
+        group = groups[skill - 1] if 1 <= skill <= len(groups) else None
+    else:
+        q = str(skill).strip().lower()
+        group = (next((g for g in groups if (g.active_skill or "").lower() == q), None)
+                 or next((g for g in groups if q in (g.active_skill or "").lower()), None))
+    if group is None:
+        return None, (f"no skill group matches {skill!r}. "
+                      f"Available: {[g.active_skill for g in groups]}")
+    return group, None
 
 
 @mcp.tool()
@@ -320,10 +366,10 @@ def list_skill_groups() -> dict:
     Requires a loaded build and the headless engine; returns {available: false} with
     setup instructions otherwise.
     """
-    _require_build()
+    loaded = _require_loaded()
     engine = get_engine()
     try:
-        return {"available": True, "skills": engine.skill_groups(_build_xml)}
+        return {"available": True, "skills": engine.skill_groups(loaded.xml)}
     except PobEngineError as e:
         return _engine_error(e)
 
@@ -348,17 +394,17 @@ def recompute_stats(config_overrides: dict | None = None, stats: list[str] | Non
     engine isn't set up, returns {available: false} with setup instructions rather than
     failing — every other tool keeps working.
     """
-    _require_build()
+    loaded = _require_loaded()
     engine = get_engine()
     try:
-        group, err = _resolve_skill_group(engine, skill)
+        group, err = _resolve_skill_group(engine, loaded.xml, skill)
         if err:
             return {"available": True, "error": err}
-        out = engine.recompute(_build_xml, overrides=config_overrides or {}, stats=stats, skill_group=group)
+        out = engine.recompute(loaded.xml, overrides=config_overrides or {}, stats=stats, skill_group=group)
     except PobEngineError as e:
         return _engine_error(e)
     res = {"available": True, "skill": skill, "overrides": config_overrides or {}, "stats": out}
-    note = engine.version_note(_build_xml)
+    note = engine.version_note(loaded.xml)
     if note:
         res["note"] = note
     return res
@@ -378,16 +424,16 @@ def compare_dps(preset: str = "combat", skill: int | str | None = None) -> dict:
     skill. For custom assumptions use recompute_stats. Requires a loaded build and the
     headless engine; returns {available: false} with setup instructions otherwise.
     """
-    _require_build()
+    loaded = _require_loaded()
     if preset not in PRESETS:
         return {"error": f"unknown preset {preset!r}", "available_presets": sorted(PRESETS)}
     engine = get_engine()
     try:
-        group, err = _resolve_skill_group(engine, skill)
+        group, err = _resolve_skill_group(engine, loaded.xml, skill)
         if err:
             return {"available": True, "error": err}
-        base = engine.recompute(_build_xml, stats=["TotalDPS"], skill_group=group)
-        buffed = engine.recompute(_build_xml, overrides=PRESETS[preset], stats=["TotalDPS"], skill_group=group)
+        base = engine.recompute(loaded.xml, stats=["TotalDPS"], skill_group=group)
+        buffed = engine.recompute(loaded.xml, overrides=PRESETS[preset], stats=["TotalDPS"], skill_group=group)
     except PobEngineError as e:
         return _engine_error(e)
     b = base.get("TotalDPS") or 0
@@ -401,7 +447,7 @@ def compare_dps(preset: str = "combat", skill: int | str | None = None) -> dict:
         "preset_dps": s,
         "delta_pct": round((s / b - 1) * 100, 1) if b else None,
     }
-    note = engine.version_note(_build_xml)
+    note = engine.version_note(loaded.xml)
     if note:
         res["note"] = note
     return res
@@ -557,7 +603,7 @@ def get_skills() -> list[dict]:
                 for gem in group.gems
             ],
         }
-        rec = _recommend_for_group(build, group)
+        rec = _recommend_for_group(_gems, build, group)
         if rec is not None:
             hint = _top_support_hint(rec)
             if hint:
@@ -634,228 +680,8 @@ def get_skill_details(query: str) -> dict:
     return skill
 
 
-# Damage-type tokens that can appear in a support's "..._+%_final" stat id, mapped
-# to the skill dimension that must be present for the multiplier to actually apply.
-# A fire spell scales 'spell'/'area'/'elemental'/'fire'/generic, so a Brutality
-# ("physical_damage_+%_final") does nothing on it — that is what makes this build-aware.
-_DAMAGE_TOKENS = ("spell", "attack", "melee", "projectile", "area",
-                  "fire", "cold", "lightning", "physical", "chaos", "elemental",
-                  "minion", "over_time")
-# Damage-scope tags a support can require; if the skill has none of these but the
-# support requires one, its "damage" is scoped to a domain this skill doesn't use
-# (e.g. Hourglass requires DamageOverTime — useless on a pure-hit spell).
-_SCOPE_TAGS = {"DamageOverTime", "DegenOnlySpellDamage", "Minion"}
-# Ailment tokens → the element that must be dealt for the ailment to land at all.
-_AILMENT_ELEMENT = {
-    "ignit": "fire", "scorch": "fire", "burn": "fire",
-    "freeze": "cold", "chill": "cold",
-    "shock": "lightning",
-    "bleed": "physical", "bleeding": "physical",
-    "poison": "chaos",
-}
-_RESIST_KEYS = {"fire": "enemyFireResist", "cold": "enemyColdResist",
-                "lightning": "enemyLightningResist", "chaos": "enemyChaosResist"}
-
-
-def _skill_damage_dims(tags: set[str]) -> set[str]:
-    """The damage dimensions a skill scales, derived from its skill_types — used to
-    decide which '..._+%_final' multipliers actually do anything for it."""
-    dims = {"generic"}  # plain damage / hit_damage / all_damage always apply
-    for t in ("Spell", "Attack", "Melee", "Projectile", "Area"):
-        if t in tags:
-            dims.add(t.lower())
-    for el in ("Fire", "Cold", "Lightning"):
-        if el in tags:
-            dims.add(el.lower())
-            dims.add("elemental")
-    if "Physical" in tags:
-        dims.add("physical")
-    if "Chaos" in tags:
-        dims.add("chaos")
-    if "Minion" in tags:
-        dims.add("minion")
-    if {"DamageOverTime", "DegenOnlySpellDamage"} & tags:
-        dims.add("over_time")
-    return dims
-
-
-def _classify_support(gem: dict, dims: set[str], elements: set[str], tags: set[str]) -> dict:
-    """Bucket a support and score it for a skill with the given damage dims/elements.
-
-    Returns {bucket, score, applicable, key_stats, note}. Buckets:
-      penetration  — base_reduce_enemy_*_resistance_% (matched to an element dealt)
-      generic_more — an unconditional '..._+%_final' to damage the skill deals
-      conditional  — a '_final' gated on an ailment/stun/low-life/charge/etc.
-      utility      — AoE, duration, speed, or no damage payload
-    """
-    stats = gem.get("stats") or []
-    key_stats = [(s["id"], s["value"]) for s in stats
-                 if s["id"].endswith("_final")
-                 or ("resistance" in s["id"] and ("reduce_enemy" in s["id"] or "ignore" in s["id"]))]
-
-    # Penetration: resistance reduction OR outright ignore, matched to an element
-    # the skill deals. An "ignore" flag (value True) zeroes the resistance entirely,
-    # so it scores above any percentage reduction.
-    for s in stats:
-        sid = s["id"]
-        is_reduce = "reduce_enemy" in sid and "resistance" in sid
-        is_ignore = "ignore" in sid and "resistance" in sid
-        if is_reduce or is_ignore:
-            el = next((e for e in ("fire", "cold", "lightning", "chaos") if e in sid), None)
-            applicable = el in elements if el else False
-            if is_ignore:
-                score, kind = 999.0, f"hits IGNORE enemy {el} resistance entirely"
-            else:
-                score, kind = float(s["value"]), f"penetrates enemy {el} resistance"
-            note = kind if applicable else f"{el} penetration — this skill deals no {el} damage"
-            return {"bucket": "penetration", "score": score,
-                    "applicable": applicable, "key_stats": key_stats, "note": note}
-
-    best = None  # (score, note, applicable, bucket) for the strongest damage payload
-    for s in stats:
-        sid, val = s["id"], s["value"]
-        if not sid.endswith("_final"):
-            continue
-        ail = next((a for a in _AILMENT_ELEMENT if a in sid), None)
-
-        if ail and any(k in sid for k in ("damage", "effect", "magnitude",
-                                          "chance", "multiplier")):
-            # An ailment payload (chance/effect/magnitude). Only pays out if the
-            # skill deals the matching element AND you scale that ailment.
-            el = _AILMENT_ELEMENT[ail]
-            applicable = el in elements
-            note = (f"only adds damage if you scale {ail.rstrip('e')} ({el}) ailments"
-                    if applicable else f"{ail}-based — this skill deals no {el} damage")
-            cand = (float(val), note, applicable, "conditional")
-        elif "damage" not in sid:
-            # speed / AoE / duration / knockback / armour-break — not a hit-damage
-            # multiplier; let it fall through to the utility bucket.
-            continue
-        elif any(k in sid for k in ("stun", "low_life", "full_life", "broken_armour",
-                                    "consume", "charge", "enrag", "rage", "pin",
-                                    "executioner", "ruthless", "critical", "fully_broken")):
-            cand = (float(val), "situational — needs the gated condition met",
-                    False, "conditional")
-        else:
-            toks = [t for t in _DAMAGE_TOKENS if t in sid]
-            if toks:  # typed multiplier — applies only if the skill deals that type
-                applicable = any(t in dims for t in toks)
-                note = ("more " + "/".join(toks) + " damage" if applicable
-                        else "/".join(toks) + " — not a damage type this skill deals")
-            else:  # untyped "damage" — applies unless the support is scoped to a
-                # domain (DoT/minion) the skill doesn't use, per its `requires`.
-                scope = _SCOPE_TAGS & set(gem.get("requires") or [])
-                if scope and not (scope & tags):
-                    applicable = False
-                    note = f"{'/'.join(sorted(scope))}-scoped — not a hit-damage multiplier here"
-                else:
-                    applicable, note = True, "more damage"
-            cand = (float(val), note, applicable, "generic_more")
-
-        if best is None or cand[0] > best[0]:
-            best = cand
-
-    if best is None:
-        return {"bucket": "utility", "score": 0.0, "applicable": True,
-                "key_stats": key_stats, "note": "AoE / duration / speed — no hit-damage payload"}
-    score, note, applicable, bucket = best
-    # A "more" whose only damage final is a downside (e.g. -35% for movement) isn't
-    # a damage support — file it under utility so it doesn't top the generic bucket.
-    if bucket == "generic_more" and score <= 0:
-        bucket, note = "utility", "no positive damage multiplier — " + note
-    return {"bucket": bucket, "score": score, "applicable": applicable,
-            "key_stats": key_stats, "note": note}
-
-
-def _recommend_for_group(build, group, include_inapplicable: bool = False) -> dict | None:
-    """Bucketed support recommendations for an already-resolved socket group, or None
-    if the gem database is absent or the group's active gem isn't in it. Shared by
-    recommend_supports (full output) and get_skills (a short hint per group)."""
-    if _gems is None:
-        return None
-    active = next((g for g in group.gems if g.is_active), None)
-    if active is None:
-        return None
-    info = _gems.get(active.skill_id or active.name)
-    if info is None:
-        return None
-
-    tags = set(info.get("skill_types") or [])
-    dims = _skill_damage_dims(tags)
-    elements = {e for e in ("fire", "cold", "lightning", "chaos") if e in dims}
-    equipped = {g.name.lower() for g in group.gems if not g.is_active}
-    enemy_cfg = (build.config or {}).get("placeholders", {})
-
-    # Collapse a support family to its best (highest-score) tier so we suggest the
-    # upgrade target once, not "Fire Penetration I" and "II" as separate lines.
-    by_family: dict[str, dict] = {}
-    singles: list[dict] = []
-    for gem in _gems.supports_for(tags):
-        cls = _classify_support(gem, dims, elements, tags)
-        entry = {
-            "name": gem["name"],
-            "score": cls["score"],
-            "bucket": cls["bucket"],
-            "applicable": cls["applicable"],
-            "mana_multiplier": gem.get("mana_multiplier"),
-            "key_stats": cls["key_stats"],
-            "note": cls["note"],
-            "already_equipped": gem["name"].lower() in equipped,
-        }
-        if cls["bucket"] == "penetration" and cls["applicable"]:
-            el = next((e for e in elements if e in str(cls["key_stats"])), None)
-            res = enemy_cfg.get(_RESIST_KEYS.get(el, ""))
-            if res is not None:
-                entry["note"] += f" (enemy at {res}% in this build's Config)"
-        fams = gem.get("gem_family") or []
-        if fams:
-            key = fams[0]
-            cur = by_family.get(key)
-            if cur is None or entry["score"] > cur["score"]:
-                if cur is not None:
-                    entry["tier_of"] = key
-                by_family[key] = entry
-        else:
-            singles.append(entry)
-
-    rows = list(by_family.values()) + singles
-    buckets: dict[str, list[dict]] = {
-        "penetration": [], "generic_more": [], "conditional": [], "utility": []}
-    for r in rows:
-        if not r["applicable"] and not include_inapplicable:
-            continue
-        buckets[r["bucket"]].append(r)
-    for b in buckets.values():
-        b.sort(key=lambda r: (r["already_equipped"], -r["score"]))
-
-    return {
-        "skill": group.active_skill,
-        "skill_types": sorted(tags),
-        "scales": sorted(dims),
-        "equipped_supports": sorted(equipped),
-        "open_slots_hint": "PoE2 skills take up to 5 supports; compare against equipped_supports",
-        "buckets": buckets,
-        "note": "Compare by `note`/`key_stats`, not raw `score`: a conditional bucket's "
-                "large number only pays out if the build scales that ailment/condition. "
-                "Set include_inapplicable=true to see gems that do nothing here. "
-                "Supports trade clear for single-target — e.g. Concentrated Area boosts "
-                "single-target but shrinks clear AoE. Note that tradeoff when recommending: "
-                "don't push a single-target support without flagging its clear cost, or a "
-                "clear/AoE support without flagging weaker bossing.",
-    }
-
-
-def _top_support_hint(rec: dict, limit: int = 3) -> list[str]:
-    """A short 'why' list of the strongest *not-yet-socketed* damage supports — the
-    penetration and generic_more buckets only — for inline display in get_skills."""
-    picks = [r for b in ("penetration", "generic_more")
-             for r in rec["buckets"][b] if not r["already_equipped"]]
-    picks.sort(key=lambda r: (r["bucket"] != "penetration", -r["score"]))
-    return [f"{r['name']} — {r['note']}" for r in picks[:limit]]
-
-
 @mcp.tool()
-def recommend_supports(skill=None, include_inapplicable: bool = False) -> dict:
+def recommend_supports(skill: int | str | None = None, include_inapplicable: bool = False) -> dict:
     """
     Recommend support gems for one of the loaded build's skills, ranked and bucketed.
 
@@ -886,45 +712,22 @@ def recommend_supports(skill=None, include_inapplicable: bool = False) -> dict:
         return {"error": "Gem database not loaded."}
 
     # Resolve the skill argument to a socket group from the build (no engine needed).
-    groups = [g for g in build.socket_groups]
-    group = None
-    if skill is None:
-        group = next((g for g in groups if g.enabled), groups[0] if groups else None)
-    elif isinstance(skill, int):
-        if 1 <= skill <= len(groups):
-            group = groups[skill - 1]
-    else:
-        q = str(skill).strip().lower()
-        group = (next((g for g in groups if (g.active_skill or "").lower() == q), None)
-                 or next((g for g in groups if q in (g.active_skill or "").lower()), None))
-    if group is None:
-        return {"error": f"no skill group matches {skill!r}. "
-                         f"Available: {[g.active_skill for g in groups]}"}
+    group, err = _resolve_group_from_build(build, skill)
+    if err:
+        return {"error": err}
 
     active = next((g for g in group.gems if g.is_active), None)
     if active is None:
         return {"error": f"group {group.active_skill!r} has no active skill gem."}
-    rec = _recommend_for_group(build, group, include_inapplicable)
+    rec = _recommend_for_group(_gems, build, group, include_inapplicable)
     if rec is None:
         return {"error": f"{active.name!r} not found in the gem database."}
     return rec
 
 
-def _derive_skill_tags(skill_types) -> list[str]:
-    """Reduce a skill's full skill_types to the discovery-relevant subset: its damage
-    element(s) plus its delivery (Spell/Attack). Using every tag would over-constrain
-    a match=all search (few skills are Fire AND Projectile AND Area AND Duration); the
-    element + delivery is the pool that reuses the build's existing damage scaling."""
-    tags = set(skill_types or [])
-    out = [el for el in ("Fire", "Cold", "Lightning", "Chaos", "Physical") if el in tags]
-    delivery = "Spell" if "Spell" in tags else ("Attack" if "Attack" in tags else None)
-    if delivery:
-        out.append(delivery)
-    return out
-
-
 @mcp.tool()
-def discover_skills(skill=None, tags=None, match: str = "all", limit: int = 30) -> dict:
+def discover_skills(skill: int | str | None = None, tags: list[str] | None = None,
+                    match: str = "all", limit: int = 30) -> dict:
     """
     Discover ACTIVE skill gems the build could switch to — INCLUDING skills it does
     not currently use.
@@ -961,8 +764,8 @@ def discover_skills(skill=None, tags=None, match: str = "all", limit: int = 30) 
 
     try:
         build = _require_build()
-    except Exception:
-        build = None
+    except ValueError:
+        build = None  # no build loaded — fine when explicit tags are given
 
     used_ids: set[str] = set()
     used_names: set[str] = set()
@@ -979,19 +782,9 @@ def discover_skills(skill=None, tags=None, match: str = "all", limit: int = 30) 
         if build is None:
             return {"error": "no tags given and no build loaded; pass tags=[...] "
                              "(e.g. [\"Fire\", \"Spell\"])."}
-        groups = list(build.socket_groups)
-        group = None
-        if skill is None:
-            group = next((g for g in groups if g.enabled), groups[0] if groups else None)
-        elif isinstance(skill, int):
-            group = groups[skill - 1] if 1 <= skill <= len(groups) else None
-        else:
-            q = str(skill).strip().lower()
-            group = (next((g for g in groups if (g.active_skill or "").lower() == q), None)
-                     or next((g for g in groups if q in (g.active_skill or "").lower()), None))
-        if group is None:
-            return {"error": f"no skill group matches {skill!r}. "
-                             f"Available: {[g.active_skill for g in groups]}"}
+        group, err = _resolve_group_from_build(build, skill)
+        if err:
+            return {"error": err}
         active = next((g for g in group.gems if g.is_active), None)
         info = _gems.get(active.skill_id or active.name) if active else None
         if info is None:
@@ -1058,15 +851,6 @@ def get_spirit_reservation() -> dict:
     if _gems is None:
         return {"error": "Gem database not loaded."}
 
-    def _stat(name: str) -> float | None:
-        for s in build.stats:
-            if s.name == name:
-                try:
-                    return float(s.value)
-                except ValueError:
-                    return None
-        return None
-
     reservers: list[dict] = []
     base_total = 0
     for group in build.socket_groups:
@@ -1079,8 +863,8 @@ def get_spirit_reservation() -> dict:
             base_total += cost
             reservers.append({"skill": data["name"], "base_spirit_reservation": cost})
 
-    spirit = _stat("Spirit")
-    unreserved = _stat("SpiritUnreserved")
+    spirit = build.stat_float("Spirit")
+    unreserved = build.stat_float("SpiritUnreserved")
     out: dict = {
         "spirit_total": spirit,
         "spirit_unreserved": unreserved,
@@ -1109,7 +893,10 @@ def search_passives(query: str) -> list[dict]:
     build = _require_build()
 
     if not build.passive_nodes:
-        return [{"error": "Tree data not loaded — passive search unavailable."}]
+        raise ValueError(
+            "Tree data not loaded — passive search unavailable. Place poe2_tree.json "
+            "in the data/ directory or set TREE_DATA_PATH."
+        )
 
     q = query.lower()
     matches = [
@@ -1165,9 +952,14 @@ def search_tree(
       search_tree("Invoker")                      → all Invoker ascendancy nodes
     """
     if _tree is None:
-        return [{"error": "Tree data not loaded — passive tree search unavailable."}]
+        raise ValueError(
+            "Tree data not loaded — passive tree search unavailable. Place "
+            "poe2_tree.json in the data/ directory or set TREE_DATA_PATH."
+        )
 
-    allocated_ids: set[int] = set(_build.allocated_node_ids) if _build is not None else set()
+    allocated_ids: set[int] = (
+        set(_loaded.build.allocated_node_ids) if _loaded is not None else set()
+    )
 
     distance_map = _build_distance_map(allocated_ids) if allocated_ids else {}
 
@@ -1217,7 +1009,10 @@ def get_reachable_nodes(
     Requires both a loaded build and tree data.
     """
     if _tree is None:
-        return [{"error": "Tree data not loaded."}]
+        raise ValueError(
+            "Tree data not loaded. Place poe2_tree.json in the data/ directory "
+            "or set TREE_DATA_PATH."
+        )
 
     build = _require_build()
     allocated_ids = set(build.allocated_node_ids)
@@ -1267,7 +1062,9 @@ def get_node(node_id: int) -> dict:
 
     cls, asc = _build_class_ctx()
     view = _tree.view(node, cls, asc)
-    allocated_ids: set[int] = set(_build.allocated_node_ids) if _build is not None else set()
+    allocated_ids: set[int] = (
+        set(_loaded.build.allocated_node_ids) if _loaded is not None else set()
+    )
     result = {
         "id": view.id,
         "name": view.name,

@@ -172,32 +172,32 @@ def test_flag_stats_parsed_as_boolean():
 
 
 def test_classify_penetration_matches_element():
-    from poe2_mcp.server import _classify_support, _skill_damage_dims
+    from poe2_mcp.skills.recommend import classify_support, skill_damage_dims
     g = _gem_data()
     pen = g.get("Fire Penetration I")
     fire_tags = {"Spell", "Fire", "Area"}
-    dims = _skill_damage_dims(fire_tags)
-    fire = _classify_support(pen, dims, {"fire"}, fire_tags)
+    dims = skill_damage_dims(fire_tags)
+    fire = classify_support(pen, dims, {"fire"}, fire_tags)
     assert fire["bucket"] == "penetration" and fire["applicable"] is True
     # Same gem on a cold-only skill: fire pen does nothing.
     cold_tags = {"Spell", "Cold"}
-    cold = _classify_support(pen, _skill_damage_dims(cold_tags), {"cold"}, cold_tags)
+    cold = classify_support(pen, skill_damage_dims(cold_tags), {"cold"}, cold_tags)
     assert cold["bucket"] == "penetration" and cold["applicable"] is False
 
 
 def test_classify_ignore_resistance_flag():
-    from poe2_mcp.server import _classify_support, _skill_damage_dims
+    from poe2_mcp.skills.recommend import classify_support, skill_damage_dims
     g = _gem_data()
     fp2 = g.get("Fire Penetration II")
     fire_tags = {"Spell", "Fire", "Area"}
-    res = _classify_support(fp2, _skill_damage_dims(fire_tags), {"fire"}, fire_tags)
+    res = classify_support(fp2, skill_damage_dims(fire_tags), {"fire"}, fire_tags)
     # The flag is recognised as penetration and outscores any % reduction.
     assert res["bucket"] == "penetration" and res["applicable"] is True
     assert res["score"] > 100 and "IGNORE" in res["note"]
 
 
 def test_top_support_hint_prioritises_pen_and_skips_equipped():
-    from poe2_mcp.server import _top_support_hint
+    from poe2_mcp.skills.recommend import top_support_hint
     rec = {"buckets": {
         "penetration": [
             {"name": "Fire Penetration II", "score": 999, "note": "ignore fire res",
@@ -217,7 +217,7 @@ def test_top_support_hint_prioritises_pen_and_skips_equipped():
                          "bucket": "conditional", "already_equipped": False}],
         "utility": [],
     }}
-    hint = _top_support_hint(rec)
+    hint = top_support_hint(rec)
     # Penetration first, equipped skipped, conditional/utility never included, capped at 3.
     assert hint == [
         "Fire Penetration II — ignore fire res",
@@ -227,14 +227,14 @@ def test_top_support_hint_prioritises_pen_and_skips_equipped():
 
 
 def test_classify_buckets_and_scope():
-    from poe2_mcp.server import _classify_support, _skill_damage_dims
+    from poe2_mcp.skills.recommend import classify_support, skill_damage_dims
     fire_tags = {"Spell", "Fire", "Area"}
-    dims = _skill_damage_dims(fire_tags)
+    dims = skill_damage_dims(fire_tags)
 
     def classify(stats, requires=None):
         gem = {"stats": [{"id": i, "value": v} for i, v in stats],
                "requires": requires or []}
-        return _classify_support(gem, dims, {"fire"}, fire_tags)
+        return classify_support(gem, dims, {"fire"}, fire_tags)
 
     # Typed multiplier the skill scales → generic_more, applicable.
     area = classify([("support_x_area_damage_+%_final", 30)])
