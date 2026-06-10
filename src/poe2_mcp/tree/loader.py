@@ -16,6 +16,8 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from .._resources import resource_path
+
 
 @dataclass
 class TreeNode:
@@ -394,16 +396,13 @@ def _compute_class_aliases(class_start_ids: dict[str, int]) -> dict[str, set[str
     return aliases
 
 
-_default_path = Path(__file__).parent.parent.parent.parent / "data" / "poe2_tree.json"
-
-
 def load_default_tree() -> PassiveTree | None:
     """
     Load the tree from the default data path, returning None if not present.
     The TREE_DATA_PATH env var overrides the default location.
     """
     env_path = os.environ.get("TREE_DATA_PATH")
-    path = Path(env_path) if env_path else _default_path
+    path = Path(env_path) if env_path else resource_path("data", "poe2_tree.json")
     if not path.exists():
         return None
     return load_tree(path)

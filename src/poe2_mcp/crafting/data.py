@@ -30,7 +30,7 @@ import os
 import re
 from pathlib import Path
 
-_default_path = Path(__file__).parent.parent.parent.parent / "data" / "poe2_crafting.json"
+from .._resources import resource_path
 
 # Rollable explicit mods are capped at 3 prefixes + 3 suffixes on a Rare; Magic
 # allows one of each. Used by the advisor for slot accounting.
@@ -207,7 +207,7 @@ def load_craft_data(path: str | Path) -> CraftData:
 def load_default_craft_data() -> CraftData | None:
     """Load the crafting database from the default path, or None if absent."""
     env_path = os.environ.get("CRAFT_DATA_PATH")
-    path = Path(env_path) if env_path else _default_path
+    path = Path(env_path) if env_path else resource_path("data", "poe2_crafting.json")
     if not path.exists():
         return None
     return load_craft_data(path)

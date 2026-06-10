@@ -19,6 +19,8 @@ import os
 import re
 from pathlib import Path
 
+from .._resources import resource_path
+
 # The tag PoB sets on gems that hold a Spirit reservation while active. (The
 # broader "Buff"/"Persistent" tags also cover activate-and-consume skills like
 # Charged Staff that reserve nothing, so they would over-match here.)
@@ -27,9 +29,6 @@ _RESERVATION_TYPE = "HasReservation"
 # Trailing tier numeral on a support's display name ("Fire Penetration I",
 # "Magnified Area II"). Stripped so a bare name from a model resolves to a tier.
 _TIER_SUFFIX = re.compile(r"\s+(?:I{1,3}|IV|VI{0,3}|IX|XI{0,2}|X)$")
-
-_default_path = Path(__file__).parent.parent.parent.parent / "data" / "poe2_skills.json"
-
 
 class GemData:
     def __init__(self, skills: dict[str, dict], meta: dict | None = None):
@@ -171,7 +170,7 @@ def load_gem_data(path: str | Path) -> GemData:
 def load_default_gem_data() -> GemData | None:
     """Load the gem database from the default path, or None if not present."""
     env_path = os.environ.get("SKILL_DATA_PATH")
-    path = Path(env_path) if env_path else _default_path
+    path = Path(env_path) if env_path else resource_path("data", "poe2_skills.json")
     if not path.exists():
         return None
     return load_gem_data(path)

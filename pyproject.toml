@@ -18,6 +18,13 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/poe2_mcp"]
 
+# Ship the vendored data exports and the Lua driver inside the wheel so the
+# installed console script works outside a repo checkout (resolved via
+# poe2_mcp/_resources.py, which prefers these over the repo-layout paths).
+[tool.hatch.build.targets.wheel.force-include]
+"data" = "poe2_mcp/_bundled/data"
+"lua" = "poe2_mcp/_bundled/lua"
+
 [tool.hatch.metadata]
 allow-direct-references = true
 
