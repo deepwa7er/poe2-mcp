@@ -19,12 +19,13 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from .._resources import resource_path
+
 REPO_URL = "https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2.git"
 DEFAULT_REF = "dev"
 DEFAULT_PATH = Path.home() / ".cache" / "poe2-mcp" / "pob"
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_UTF8_FALLBACK = _REPO_ROOT / "lua" / "compat" / "lua-utf8.lua"
+_UTF8_FALLBACK = resource_path("lua", "compat", "lua-utf8.lua")
 
 # Take everything except files headless calc never uses (see module docstring).
 _SPARSE_PATTERNS = [

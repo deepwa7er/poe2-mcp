@@ -22,9 +22,10 @@ import subprocess
 import threading
 from pathlib import Path
 
+from .._resources import resource_path
 from .setup import DEFAULT_PATH, DEFAULT_REF, SetupError, ensure_pob, is_set_up
 
-_DRIVER = Path(__file__).resolve().parents[3] / "lua" / "pob_driver.lua"
+_DRIVER = resource_path("lua", "pob_driver.lua")
 
 
 class PobEngineError(RuntimeError):
@@ -45,7 +46,10 @@ class PobEngine:
         self.autosetup = (os.environ.get("POB_AUTOSETUP", "1") != "0") if autosetup is None else autosetup
         self._proc: subprocess.Popen | None = None
         self._q: queue.Queue[str | None] = queue.Queue()
-        self._lock = threading.Lock()
+        # Re-entrant: recompute/skill_groups hold it across their whole multi-request
+        # sequence (load → select → set_config → get_output) — the daemon is stateful,
+        # so interleaving two sequences would compute stats under the wrong config.
+        self._lock = threading.RLock()
         self._id = 0
         self._cache: dict[tuple, dict] = {}      # (xml, overrides, stats, group) -> output
         self._versions: dict[int, dict] = {}     # hash(xml) -> {tree_version, pob_tree_version}
@@ -179,12 +183,13 @@ class PobEngine:
         if key in self._cache:
             return self._cache[key]
 
-        self.load(xml)
-        if skill_group is not None:
-            self._request(cmd="select_skill", group=skill_group)
-        if overrides:
-            self.set_config(overrides)
-        out = self.get_output(stats)
+        with self._lock:  # the whole sequence — the daemon is stateful
+            self.load(xml)
+            if skill_group is not None:
+                self._request(cmd="select_skill", group=skill_group)
+            if overrides:
+                self.set_config(overrides)
+            out = self.get_output(stats)
 
         self._cache[key] = out
         if len(self._cache) > 64:                 # simple bound, FIFO eviction
@@ -197,8 +202,9 @@ class PobEngine:
         enabled, is_main. Cached per build."""
         h = hash(xml)
         if h not in self._skills:
-            self.load(xml)
-            self._skills[h] = self._request(cmd="list_skills").get("skills", [])
+            with self._lock:  # load + list as one unit — the daemon is stateful
+                self.load(xml)
+                self._skills[h] = self._request(cmd="list_skills").get("skills", [])
         return self._skills[h]
 
     def version_note(self, xml: str) -> str | None:
