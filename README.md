@@ -162,13 +162,11 @@ you can see which fragment came from which need.
 
 ## Tree data
 
-The passive tree data is sourced from the community-maintained [passive-skill-tree-json](https://github.com/poe-tool-dev/passive-skill-tree-json) repository, which mirrors the format published by Grinding Gear Games. The bundled `data/poe2_tree.json` can be replaced with a newer version by dropping a fresh file in the same location, or by pointing the `TREE_DATA_PATH` environment variable at an alternative path.
+The passive tree is generated from Path of Building 2's bundled tree data (`src/TreeData/<version>/tree.lua` in the PoB2 repo) by `scripts/build_tree_data.py` — GGG publishes no official PoE2 tree JSON, and the community [passive-skill-tree-json](https://github.com/poe-tool-dev/passive-skill-tree-json) mirror is PoE1-only. Sourcing from PoB2 keeps the tree version-aligned with the gem database and the recompute engine, which track the same repo. Regenerate the bundled `data/poe2_tree.json` after a patch with `uv run python scripts/build_tree_data.py`, or point the `TREE_DATA_PATH` environment variable at an alternative file.
 
 ## Crafting data
 
 The affix pool and base types are sourced from the [RePoE-fork PoE2 export](https://repoe-fork.github.io/poe2/) — static JSON extracted from the client (GGG ships no PoE2 data export, and poe2db has no data API). `scripts/build_craft_data.py` fetches and slims it to the bundled `data/poe2_crafting.json`. The pool drifts between patches; regenerate with `uv run python scripts/build_craft_data.py`, or point `CRAFT_DATA_PATH` at an alternative file.
-
-The passive tree data is sourced from the community-maintained [passive-skill-tree-json](https://github.com/poe-tool-dev/passive-skill-tree-json) repository, which mirrors the format published by Grinding Gear Games. The bundled `data/poe2_tree.json` can be replaced with a newer version by dropping a fresh file in the same location, or by pointing the `TREE_DATA_PATH` environment variable at an alternative path.
 
 ## Development
 
