@@ -7,6 +7,16 @@ class Stat:
     value: str
 
 
+def _stat_to_float(value) -> float | None:
+    if value is None:
+        return None
+    s = str(value).strip().replace(",", "").rstrip("%").strip()
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
 @dataclass
 class PassiveNode:
     id: int
@@ -43,6 +53,9 @@ class SkillGem:
     enabled: bool = True
     skill_id: str = ""
     gem_id: str = ""
+    # Heuristic from the export's ids (skillId "Support..." / gemId "...SupportGem...").
+    # False for gems with no ids at all, so a nameSpec-only support can slip through.
+    is_support: bool = False
 
 
 @dataclass
@@ -67,3 +80,17 @@ class Build:
     config: dict = field(default_factory=dict)
     # Resolved after loading tree data
     passive_nodes: list[PassiveNode] = field(default_factory=list)
+
+    def stat_float(self, *names: str) -> float | None:
+        """First matching stat (exact case-insensitive name) as a float, else None.
+
+        PoB stat names vary between versions, so callers pass candidates in
+        preference order; values like "75%" or "1,234" are normalised.
+        """
+        lookup = {s.name.lower(): s.value for s in self.stats}
+        for name in names:
+            if name.lower() in lookup:
+                v = _stat_to_float(lookup[name.lower()])
+                if v is not None:
+                    return v
+        return None

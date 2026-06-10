@@ -29,7 +29,7 @@ PoB XML structure:
 
 import xml.etree.ElementTree as ET
 
-from .models import Build, Item, PassiveNode, SkillGem, SocketGroup, Stat
+from .models import Build, Item, SkillGem, SocketGroup, Stat
 from .item_parser import parse_item_text
 
 
@@ -160,6 +160,16 @@ def _parse_items(root: ET.Element) -> list[Item]:
     return items
 
 
+def _gem_is_support(skill_id: str, gem_id: str) -> bool:
+    """Heuristic support detection from the export's ids.
+
+    Supports carry skillId "Support..." (e.g. "SupportFirePenetrationPlayer") or a
+    gemId containing "SupportGem". A gem with no ids at all (a name typed into PoB
+    without resolving) can't be classified and is treated as non-support.
+    """
+    return skill_id.startswith("Support") or "SupportGem" in gem_id
+
+
 def _parse_skills(root: ET.Element) -> list[SocketGroup]:
     skills_elem = root.find("Skills")
     if skills_elem is None:
@@ -191,7 +201,12 @@ def _parse_skills(root: ET.Element) -> list[SocketGroup]:
 
         gems: list[SkillGem] = []
         active_skill = ""
-        for i, gem_elem in enumerate(skill_elem.findall("Gem")):
+        # mainActiveSkill indexes PoB's displaySkillList, which holds only the
+        # skills granted by ENABLED, NON-SUPPORT gems (CalcSetup.lua builds it
+        # that way) — NOT the group's full gem list. Count matching gems as we
+        # go so a support listed before the active gem doesn't shift the index.
+        active_candidate = 0
+        for gem_elem in skill_elem.findall("Gem"):
             name = gem_elem.get("nameSpec", gem_elem.get("skillId", ""))
             try:
                 level = int(gem_elem.get("level", "1"))
@@ -202,8 +217,13 @@ def _parse_skills(root: ET.Element) -> list[SocketGroup]:
             except ValueError:
                 quality = 0
             gem_enabled = gem_elem.get("enabled", "true").lower() == "true"
-            # The gem at mainActiveSpec index is the active skill
-            is_active = i == main_active_spec
+            skill_id = gem_elem.get("skillId", "")
+            gem_id = gem_elem.get("gemId", "")
+            is_support = _gem_is_support(skill_id, gem_id)
+            is_active = False
+            if gem_enabled and not is_support:
+                is_active = active_candidate == main_active_spec
+                active_candidate += 1
             if is_active:
                 active_skill = name
             gems.append(SkillGem(
@@ -212,15 +232,18 @@ def _parse_skills(root: ET.Element) -> list[SocketGroup]:
                 quality=quality,
                 is_active=is_active,
                 enabled=gem_enabled,
-                skill_id=gem_elem.get("skillId", ""),
-                gem_id=gem_elem.get("gemId", ""),
+                skill_id=skill_id,
+                gem_id=gem_id,
+                is_support=is_support,
             ))
 
-        if not gems:
-            continue
-
+        # Fall back to the first non-support gem (then any gem) so the group still
+        # carries a label when mainActiveSkill is out of range or everything is
+        # disabled. Empty groups are KEPT (active_skill "") — PoB keeps them in its
+        # socket-group list, and dropping them would shift 1-based group indices
+        # out of alignment with the headless engine's list_skills.
         if not active_skill and gems:
-            active_skill = gems[0].name
+            active_skill = next((g.name for g in gems if not g.is_support), gems[0].name)
 
         groups.append(SocketGroup(
             slot=slot,

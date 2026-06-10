@@ -209,3 +209,65 @@ def test_parse_pob2_skillset_nesting():
     assert group.active_skill == "Walking Calamity"   # from activeSkillSet=2, mainActiveSkill=1
     assert len(group.gems) == 2
     assert group.gems[0].skill_id == "WalkingCalamityPlayer"   # skillId flows through
+
+
+# mainActiveSkill indexes PoB's displaySkillList — enabled, non-support gems only —
+# not the group's full gem list. Supports before the active gem must not shift it.
+MAIN_ACTIVE_XML = """<PathOfBuilding2>
+  <Build level="50" className="Witch"/>
+  <Skills>
+    <Skill mainActiveSkill="1" enabled="true">
+      <Gem nameSpec="Fire Penetration I" skillId="SupportFirePenetrationPlayer"
+           gemId="Metadata/Items/Gems/SupportGemFirePenetration" level="1" quality="0"/>
+      <Gem nameSpec="Firebolt" skillId="FireboltPlayer"
+           gemId="Metadata/Items/Gems/SkillGemFirebolt" level="12" quality="0"/>
+    </Skill>
+    <Skill mainActiveSkill="2" enabled="true">
+      <Gem nameSpec="Cast on Ignite" skillId="MetaCastOnIgnitePlayer"
+           gemId="Metadata/Items/Gems/SkillGemCastOnIgnite" level="8" quality="0"/>
+      <Gem nameSpec="Magnified Area I" skillId="SupportMagnifiedAreaPlayer"
+           gemId="Metadata/Items/Gems/SupportGemMagnifiedEffect" level="1" quality="0"/>
+      <Gem nameSpec="Firestorm" skillId="FirestormPlayer"
+           gemId="Metadata/Items/Gems/SkillGemFirestorm" level="9" quality="0"/>
+    </Skill>
+    <Skill mainActiveSkill="1" enabled="true">
+      <Gem nameSpec="Disabled Nuke" skillId="DisabledNukePlayer" enabled="false" level="1" quality="0"/>
+      <Gem nameSpec="Spark" skillId="SparkPlayer" level="1" quality="0"/>
+    </Skill>
+    <Skill enabled="true"/>
+    <Skill mainActiveSkill="1" enabled="true">
+      <Gem nameSpec="Last Group" skillId="LastGroupPlayer" level="1" quality="0"/>
+    </Skill>
+  </Skills>
+</PathOfBuilding2>"""
+
+
+def test_main_active_skill_skips_supports():
+    build = parse_build_xml(MAIN_ACTIVE_XML)
+    g1 = build.socket_groups[0]
+    # mainActiveSkill=1 means the first NON-SUPPORT gem, not gems[0] (a support).
+    assert g1.active_skill == "Firebolt"
+    assert [g.name for g in g1.gems if g.is_active] == ["Firebolt"]
+    assert g1.gems[0].is_support is True and g1.gems[1].is_support is False
+
+    # mainActiveSkill=2 counts only the actives: Cast on Ignite (1), Firestorm (2).
+    g2 = build.socket_groups[1]
+    assert g2.active_skill == "Firestorm"
+    assert [g.name for g in g2.gems if g.is_active] == ["Firestorm"]
+
+
+def test_main_active_skill_skips_disabled_gems():
+    build = parse_build_xml(MAIN_ACTIVE_XML)
+    g3 = build.socket_groups[2]
+    # The disabled gem doesn't occupy an index in PoB's display list.
+    assert g3.active_skill == "Spark"
+    assert [g.name for g in g3.gems if g.is_active] == ["Spark"]
+
+
+def test_empty_socket_groups_are_kept_for_index_alignment():
+    build = parse_build_xml(MAIN_ACTIVE_XML)
+    # PoB keeps gem-less groups in its socket-group list; dropping them would shift
+    # the 1-based indices shared with the headless engine.
+    assert len(build.socket_groups) == 5
+    assert build.socket_groups[3].gems == [] and build.socket_groups[3].active_skill == ""
+    assert build.socket_groups[4].active_skill == "Last Group"
