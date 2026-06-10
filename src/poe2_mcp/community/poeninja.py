@@ -24,11 +24,21 @@ from .cache import TTLCache
 _BASE = "https://poe.ninja"
 _UA = "poe2-mcp build-analysis (https://github.com/deepwa7er/poe2-mcp)"
 _cache = TTLCache(ttl=900.0)
+_client: httpx.Client | None = None
 
 
 # ---------------------------------------------------------------------------
 # HTTP (cached). Tests monkeypatch _get_json / _get_bytes to use fixtures.
 # ---------------------------------------------------------------------------
+
+def _http() -> httpx.Client:
+    """Process-wide client, created lazily — reuses connections across calls."""
+    global _client
+    if _client is None:
+        _client = httpx.Client(base_url=_BASE, headers={"User-Agent": _UA},
+                               timeout=20, follow_redirects=True)
+    return _client
+
 
 def _key(path: str, params: dict | None) -> str:
     if not params:
@@ -41,10 +51,9 @@ def _get_json(path: str, params: dict | None = None) -> dict:
     hit = _cache.get(ck)
     if hit is not None:
         return hit
-    with httpx.Client(base_url=_BASE, headers={"User-Agent": _UA}, timeout=20, follow_redirects=True) as c:
-        r = c.get(path, params=params)
-        r.raise_for_status()
-        data = r.json()
+    r = _http().get(path, params=params)
+    r.raise_for_status()
+    data = r.json()
     _cache.set(ck, data)
     return data
 
@@ -54,10 +63,9 @@ def _get_bytes(path: str, params: dict | None = None) -> bytes:
     hit = _cache.get(ck)
     if hit is not None:
         return hit
-    with httpx.Client(base_url=_BASE, headers={"User-Agent": _UA}, timeout=20, follow_redirects=True) as c:
-        r = c.get(path, params=params)
-        r.raise_for_status()
-        data = r.content
+    r = _http().get(path, params=params)
+    r.raise_for_status()
+    data = r.content
     _cache.set(ck, data)
     return data
 

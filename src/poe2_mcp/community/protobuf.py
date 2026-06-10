@@ -29,7 +29,10 @@ def _read_varint(buf: bytes, i: int) -> tuple[int, int]:
     shift = 0
     result = 0
     while True:
-        b = buf[i]
+        try:
+            b = buf[i]
+        except IndexError:
+            raise ValueError(f"truncated protobuf message: varint runs past byte {len(buf)}") from None
         i += 1
         result |= (b & 0x7F) << shift
         if not b & 0x80:

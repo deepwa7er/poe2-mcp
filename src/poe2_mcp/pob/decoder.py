@@ -1,6 +1,7 @@
 import base64
 import zlib
-import re
+from urllib.parse import urlparse
+
 import httpx
 
 
@@ -29,6 +30,12 @@ def _fetch_from_pobb_in(url: str) -> str:
     pobb.in share links are of the form https://pobb.in/<id>.
     The raw export code is available at https://pobb.in/<id>/raw.
     """
+    host = (urlparse(url).hostname or "").lower()
+    if host != "pobb.in" and not host.endswith(".pobb.in"):
+        raise ValueError(
+            f"Only pobb.in share links are supported, got {host or url!r}. "
+            "For other sites, copy the raw PoB export code and pass that instead."
+        )
     # Normalise: strip trailing slashes, strip /raw if already present
     url = url.rstrip("/")
     if url.endswith("/raw"):
