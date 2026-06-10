@@ -18,30 +18,6 @@ from .pob.models import Build
 DEFAULT_MAX_RESIST = 75.0
 
 
-def _to_float(value) -> float | None:
-    if value is None:
-        return None
-    s = str(value).strip().replace(",", "").rstrip("%").strip()
-    try:
-        return float(s)
-    except ValueError:
-        return None
-
-
-def _stat_lookup(build: Build) -> dict[str, str]:
-    return {s.name.lower(): s.value for s in build.stats}
-
-
-def _find(lookup: dict[str, str], *names: str) -> float | None:
-    """Return the first matching stat value (by exact case-insensitive name) as a float."""
-    for name in names:
-        if name.lower() in lookup:
-            v = _to_float(lookup[name.lower()])
-            if v is not None:
-                return v
-    return None
-
-
 # ---------------------------------------------------------------------------
 # Passive point budget
 # ---------------------------------------------------------------------------
@@ -117,12 +93,11 @@ def analyze_defenses(build: Build) -> list[dict]:
     build's max-resist stat if present, else the standard 75% cap. Findings are
     heuristic; the underlying value is always included so callers can judge.
     """
-    lookup = _stat_lookup(build)
     findings: list[dict] = []
 
     # Elemental resistances
     for label, res_name, max_name, over_name in _ELEMENTS:
-        value = _find(lookup, res_name)
+        value = build.stat_float(res_name)
         if value is None:
             findings.append({
                 "category": "resistance",
@@ -133,8 +108,8 @@ def analyze_defenses(build: Build) -> list[dict]:
             })
             continue
 
-        cap = _find(lookup, max_name) or DEFAULT_MAX_RESIST
-        overcap = _find(lookup, over_name)
+        cap = build.stat_float(max_name) or DEFAULT_MAX_RESIST
+        overcap = build.stat_float(over_name)
 
         if value < 0:
             severity = "critical"
@@ -158,7 +133,7 @@ def analyze_defenses(build: Build) -> list[dict]:
         })
 
     # Chaos resistance — uncapped and commonly negative; informational.
-    chaos = _find(lookup, "ChaosResist")
+    chaos = build.stat_float("ChaosResist")
     if chaos is None:
         findings.append({
             "category": "resistance", "severity": "info", "stat": "Chaos",
@@ -172,9 +147,9 @@ def analyze_defenses(build: Build) -> list[dict]:
         })
 
     # Health pool
-    life = _find(lookup, "Life")
-    es = _find(lookup, "EnergyShield")
-    ehp = _find(lookup, "TotalEHP")
+    life = build.stat_float("Life")
+    es = build.stat_float("EnergyShield")
+    ehp = build.stat_float("TotalEHP")
     pool = (life or 0) + (es or 0)
 
     if life is not None:

@@ -38,21 +38,6 @@ class Priority:
     reason: str     # why included, surfaced to the user
 
 
-def _stat(build: Build, *names: str) -> float | None:
-    """First matching stat (case-insensitive name) as a float, else None."""
-    lookup = {s.name.lower(): s.value for s in build.stats}
-    for n in names:
-        v = lookup.get(n.lower())
-        if v is None:
-            continue
-        s = str(v).strip().replace(",", "").rstrip("%").strip()
-        try:
-            return float(s)
-        except ValueError:
-            continue
-    return None
-
-
 def _collect_damage_tags(build: Build, gems) -> set[str]:
     """Lowercased skill_types of every enabled active skill, via the gem database.
 
@@ -90,8 +75,8 @@ def _resist_priorities(build: Build) -> list[Priority]:
         ("Cold",      "cold_res",      "ColdResist",      "ColdResistMax"),
         ("Lightning", "lightning_res", "LightningResist", "LightningResistMax"),
     ):
-        val = _stat(build, name)
-        cap = _stat(build, max_name) or DEFAULT_MAX_RESIST
+        val = build.stat_float(name)
+        cap = build.stat_float(max_name) or DEFAULT_MAX_RESIST
         if val is not None and val >= cap:
             continue  # already capped — skip
         gap = cap if val is None else (cap - val)
@@ -100,7 +85,7 @@ def _resist_priorities(build: Build) -> list[Priority]:
             reason=(f"short {gap:g}% of {cap:g}% cap"
                     if val is not None else "not present in export"),
         ))
-    chaos = _stat(build, "ChaosResist")
+    chaos = build.stat_float("ChaosResist")
     if chaos is not None and chaos < -30:
         out.append(Priority(
             key="chaos_res", weight=55, label="Chaos Resistance",
@@ -156,8 +141,8 @@ def _damage_priorities(tags: set[str]) -> list[Priority]:
 def _defensive_priorities(build: Build) -> list[Priority]:
     """Always-on defensive fragments. Life is core; ES is added for ES-leaning builds."""
     out: list[Priority] = []
-    life = _stat(build, "Life") or 0
-    es = _stat(build, "EnergyShield") or 0
+    life = build.stat_float("Life") or 0
+    es = build.stat_float("EnergyShield") or 0
     out.append(Priority(
         key="life", weight=100, label="Life",
         reason=f"current Life {life:g}",
