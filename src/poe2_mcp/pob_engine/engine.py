@@ -174,9 +174,11 @@ class PobEngine:
         """Load a build, optionally select a skill group and apply config overrides,
         then return the requested computed stats. Results are cached per
         (build, overrides, stats, skill_group) — identical calls skip the round-trip."""
+        # Overrides come from tool input and may hold nested values; json.dumps
+        # keys them without the TypeError tuple(sorted(...)) hits on unhashables.
         key = (
             hash(xml),
-            tuple(sorted((overrides or {}).items())),
+            json.dumps(overrides or {}, sort_keys=True, default=str),
             tuple(stats or ()),
             skill_group,
         )

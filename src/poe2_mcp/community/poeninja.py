@@ -107,7 +107,7 @@ def get_meta_overview(league: str | None = None) -> dict:
     if not leagues:
         return {}
     if league:
-        lb = next((l for l in leagues if league in (l.get("leagueUrl"), l.get("leagueName"))), None)
+        lb = next((lg for lg in leagues if league in (lg.get("leagueUrl"), lg.get("leagueName"))), None)
         if lb is None:
             raise ValueError(f"league {league!r} not found")
     else:

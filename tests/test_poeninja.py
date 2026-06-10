@@ -124,3 +124,16 @@ def test_fetch_character_export_not_indexed(monkeypatch):
     monkeypatch.setattr(poeninja, "fetch_pob_export", _raise_404)
     with pytest.raises(ValueError, match="passes a level threshold"):
         poeninja.fetch_character_export("methanman#2640", "pingkong")
+
+
+def test_ttl_cache_sweeps_expired_on_set(monkeypatch):
+    from poe2_mcp.community.cache import TTLCache
+    import time as _time
+
+    now = [1000.0]
+    monkeypatch.setattr(_time, "monotonic", lambda: now[0])
+    cache = TTLCache(ttl=10.0)
+    cache.set("a", "old")
+    now[0] += 11  # "a" expires
+    cache.set("b", "new")  # write sweeps the dead entry
+    assert "a" not in cache._store and cache.get("b") == "new"

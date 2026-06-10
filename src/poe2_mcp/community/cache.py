@@ -28,7 +28,11 @@ class TTLCache:
         return value
 
     def set(self, key: Any, value: Any) -> None:
-        self._store[key] = (time.monotonic(), value)
+        now = time.monotonic()
+        # Sweep expired entries on write so payloads (search bytes can be ~100 KB)
+        # don't accumulate forever — get() only evicts the key it was asked for.
+        self._store = {k: e for k, e in self._store.items() if now - e[0] < self.ttl}
+        self._store[key] = (now, value)
 
     def clear(self) -> None:
         self._store.clear()
