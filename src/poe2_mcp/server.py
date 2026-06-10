@@ -190,12 +190,25 @@ def load_build(code: str) -> str:
     return _loaded_build_summary()
 
 
+def _gem_db_support_detector(name: str) -> bool | None:
+    """Resolve an id-less gem name to is-it-a-support via the gem database.
+
+    Some exports carry gems as a bare nameSpec with no skillId/gemId (e.g. a name
+    typed into PoB), which the parser's id heuristic can't classify — misreading a
+    support as active would shift the mainActiveSkill index. None = still unknown.
+    """
+    if _gems is None or not name:
+        return None
+    info = _gems.get(name)
+    return bool(info.get("is_support")) if info is not None else None
+
+
 def _load_build_from_xml(xml: str) -> Build:
     """Parse XML into the module-level build, resolving passive names if tree data is present."""
     global _loaded, _tree
     if _tree is None:
         _tree = load_default_tree()
-    build = parse_build_xml(xml)
+    build = parse_build_xml(xml, support_detector=_gem_db_support_detector)
     if _tree is not None:
         cls, asc = (build.class_name or None), (build.ascendancy or None)
         build.passive_nodes = _tree.resolve_ids(build.allocated_node_ids, cls, asc)
@@ -528,7 +541,9 @@ def get_skills() -> list[dict]:
 
     Each group shows the active skill, its support gems, the slot it occupies,
     and whether it is enabled. Each gem includes its skill_id — pass that (or the
-    gem name) to get_skill_details to look up the gem's mechanics.
+    gem name) to get_skill_details to look up the gem's mechanics — and is_support.
+    A group with no gems appears with active_skill "" (kept so group indices line
+    up with list_skill_groups).
 
     READ THIS before interpreting `level`/`quality` (PoE2 ≠ PoE1):
       - For SUPPORT gems, `level` is NOT an XP-driven power level. PoE2 supports
@@ -597,6 +612,7 @@ def get_skills() -> list[dict]:
                     "level": gem.level,
                     "quality": gem.quality,
                     "is_active": gem.is_active,
+                    "is_support": gem.is_support,
                     "enabled": gem.enabled,
                     "skill_id": gem.skill_id,
                 }
@@ -692,7 +708,8 @@ def recommend_supports(skill: int | str | None = None, include_inapplicable: boo
     MODIFIER TYPE to look for.
 
     skill — 1-based socket-group index, or an active skill name (e.g. "Firestorm");
-            defaults to the first enabled group. See get_skills / list_skill_groups.
+            defaults to the first enabled group with gems. See get_skills /
+            list_skill_groups (the two share group indexing).
     include_inapplicable — also return supports whose payload does nothing for this
             skill (wrong damage type, ailment the skill can't inflict). Off by default.
 
@@ -740,8 +757,8 @@ def discover_skills(skill: int | str | None = None, tags: list[str] | None = Non
     build stronger — don't answer from only the equipped skills.
 
     skill — reference socket group (1-based index or active skill name) whose element +
-            delivery seed the search; defaults to the first enabled group. Ignored when
-            `tags` is given.
+            delivery seed the search; defaults to the first enabled group with gems.
+            Ignored when `tags` is given.
     tags  — explicit skill_type filter (e.g. ["Fire", "Spell"]). Overrides `skill`.
     match — "all" (default): a skill must have every tag; "any": at least one.
     limit — cap on returned skills (default 30).
@@ -883,7 +900,7 @@ def search_passives(query: str) -> list[dict]:
     Search the loaded build's allocated passives for nodes matching a keyword.
 
     Searches both node names and stat descriptions (case-insensitive).
-    Requires tree data to be loaded; returns an error message otherwise.
+    Requires tree data to be loaded; raises an error otherwise.
 
     Examples:
       search_passives("life")      → all life-related nodes

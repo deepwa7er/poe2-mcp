@@ -28,12 +28,18 @@ PoB XML structure:
 """
 
 import xml.etree.ElementTree as ET
+from typing import Callable
 
 from .models import Build, Item, SkillGem, SocketGroup, Stat
 from .item_parser import parse_item_text
 
+# Resolves a gem NAME to is-it-a-support (True/False) or None for "unknown".
+# Consulted only for gems whose export carries no ids; lets a caller with a gem
+# database catch supports the id heuristic can't see (see _gem_is_support).
+SupportDetector = Callable[[str], bool | None]
 
-def parse_build_xml(xml: str) -> Build:
+
+def parse_build_xml(xml: str, support_detector: SupportDetector | None = None) -> Build:
     root = ET.fromstring(xml)
     return Build(
         class_name=_parse_class(root),
@@ -41,7 +47,7 @@ def parse_build_xml(xml: str) -> Build:
         level=_parse_level(root),
         allocated_node_ids=_parse_node_ids(root),
         items=_parse_items(root),
-        socket_groups=_parse_skills(root),
+        socket_groups=_parse_skills(root, support_detector),
         stats=_parse_stats(root),
         notes=_parse_notes(root),
         config=_parse_config(root),
@@ -160,17 +166,21 @@ def _parse_items(root: ET.Element) -> list[Item]:
     return items
 
 
-def _gem_is_support(skill_id: str, gem_id: str) -> bool:
-    """Heuristic support detection from the export's ids.
+def _gem_is_support(skill_id: str, gem_id: str) -> bool | None:
+    """Support detection from the export's ids; None when the gem carries no ids.
 
     Supports carry skillId "Support..." (e.g. "SupportFirePenetrationPlayer") or a
     gemId containing "SupportGem". A gem with no ids at all (a name typed into PoB
-    without resolving) can't be classified and is treated as non-support.
+    without resolving) can't be classified here — callers may resolve it by name
+    via a SupportDetector (the server backs one with the gem database).
     """
+    if not skill_id and not gem_id:
+        return None
     return skill_id.startswith("Support") or "SupportGem" in gem_id
 
 
-def _parse_skills(root: ET.Element) -> list[SocketGroup]:
+def _parse_skills(root: ET.Element,
+                  support_detector: SupportDetector | None = None) -> list[SocketGroup]:
     skills_elem = root.find("Skills")
     if skills_elem is None:
         return []
@@ -220,6 +230,8 @@ def _parse_skills(root: ET.Element) -> list[SocketGroup]:
             skill_id = gem_elem.get("skillId", "")
             gem_id = gem_elem.get("gemId", "")
             is_support = _gem_is_support(skill_id, gem_id)
+            if is_support is None:  # id-less gem — fall back to name resolution
+                is_support = bool(support_detector and support_detector(name))
             is_active = False
             if gem_enabled and not is_support:
                 is_active = active_candidate == main_active_spec

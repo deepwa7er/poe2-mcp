@@ -264,6 +264,36 @@ def test_main_active_skill_skips_disabled_gems():
     assert [g.name for g in g3.gems if g.is_active] == ["Spark"]
 
 
+def test_support_detector_classifies_idless_gems():
+    # An id-less support (a bare nameSpec, like "Unleash" in real exports) can't be
+    # classified from ids; a SupportDetector backed by a gem database can. Without
+    # it the gem counts as an active candidate and shifts mainActiveSkill.
+    xml = """<PathOfBuilding2>
+      <Build level="50" className="Witch"/>
+      <Skills>
+        <Skill mainActiveSkill="1" enabled="true">
+          <Gem nameSpec="Unleash" level="1" quality="0"/>
+          <Gem nameSpec="Fireball" skillId="FireballPlayer"
+               gemId="Metadata/Items/Gem/SkillGemFireball" level="10" quality="0"/>
+        </Skill>
+      </Skills>
+    </PathOfBuilding2>"""
+
+    def detector(name):
+        return True if name == "Unleash" else None
+
+    build = parse_build_xml(xml, support_detector=detector)
+    group = build.socket_groups[0]
+    assert group.active_skill == "Fireball"
+    assert group.gems[0].is_support is True and group.gems[1].is_active is True
+
+    # Without a detector the id-less gem stays unknown → non-support (documented
+    # fallback), and takes the mainActiveSkill=1 slot.
+    fallback = parse_build_xml(xml).socket_groups[0]
+    assert fallback.gems[0].is_support is False
+    assert fallback.active_skill == "Unleash"
+
+
 def test_empty_socket_groups_are_kept_for_index_alignment():
     build = parse_build_xml(MAIN_ACTIVE_XML)
     # PoB keeps gem-less groups in its socket-group list; dropping them would shift
