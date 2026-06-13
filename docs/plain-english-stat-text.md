@@ -1,7 +1,25 @@
-# Plain-English stat text for gems (planned)
+# Plain-English stat text for gems
 
-**Status:** scoped, not built (2026-06-07). Branch where the prerequisite gem
-enrichment landed: `gem-data-enrichment`.
+**Status:** Phase 1 built (2026-06-13). Single-stat lines render; multi-stat lines
+and most value transforms remain (Phases 2–3 below). The prerequisite gem
+enrichment landed earlier on `gem-data-enrichment`.
+
+## What Phase 1 shipped
+
+- `skills/statdesc.py` — a recursive-descent parser for PoB2's stat-description
+  Lua (`parse_stat_descriptions`), plus the runtime `StatDescriptions` /
+  `render` that turn a stat id+value into the in-game line.
+- `scripts/build_stat_data.py` — fetches the three StatDescriptions files, keeps
+  the single-stat lines, and vendors `data/poe2_stat_descriptions.json` slimmed to
+  the ids `poe2_skills.json` references, in two scopes (`support` / `skill`).
+- `GemData._enrich` attaches a `text` to each `stats` / `quality_stats` /
+  `family_tiers` entry it can render; `id`/`value` are untouched, so existing
+  consumers are unaffected. `get_skill_details` and `recommend_supports` surface it.
+
+Coverage: of the ~1,138 referenced ids that have any tooltip line, Phase 1 renders
+~937 (82%); the rest are multi-stat lines (~200, Phase 2) and a long tail of
+internal/no-display stats that correctly stay raw. The one transform applied is
+milliseconds→seconds (`*_ms`); per-minute rates and ÷100 fractions are Phase 2.
 
 ## Problem
 
@@ -92,10 +110,11 @@ example (Fire Penetration I, entry `[82]`):
 
 ## Phasing
 
-- **Phase 1** — single-stat, no-transform rendering. Covers the bulk of support
-  and flat-effect lines (the stuff that drives gem advice). Parser + renderer +
-  slim vendoring + tests + regen. ~one focused session.
-- **Phase 2** — value transforms + multi-stat lines.
+- **Phase 1** — single-stat rendering (+ the ms→s transform). DONE. Covers the bulk
+  of support and flat-effect lines (the stuff that drives gem advice). Parser +
+  renderer + slim vendoring + tests + regen.
+- **Phase 2** — remaining value transforms (per-minute, ÷100 fractions) + multi-stat
+  lines (siblings sharing one line, e.g. min+max damage).
 - **Phase 3** — quality-gradient phrasing + full scope-fallback chain.
 
 ## Related

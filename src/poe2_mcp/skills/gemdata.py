@@ -20,6 +20,7 @@ import re
 from pathlib import Path
 
 from .._resources import resource_path
+from .statdesc import StatDescriptions, load_default_stat_descriptions
 
 # The tag PoB sets on gems that hold a Spirit reservation while active. (The
 # broader "Buff"/"Persistent" tags also cover activate-and-consume skills like
@@ -31,9 +32,13 @@ _RESERVATION_TYPE = "HasReservation"
 _TIER_SUFFIX = re.compile(r"\s+(?:I{1,3}|IV|VI{0,3}|IX|XI{0,2}|X)$")
 
 class GemData:
-    def __init__(self, skills: dict[str, dict], meta: dict | None = None):
+    def __init__(self, skills: dict[str, dict], meta: dict | None = None,
+                 descriptions: StatDescriptions | None = None):
         self._skills = skills
         self.meta = meta or {}
+        # Optional stat-id → in-game-line renderer (Layer 2). When present, _enrich
+        # attaches a human-readable `text` to each stat entry; absent, ids stay raw.
+        self._desc = descriptions
         # name → skillId, lowercased, for name-based lookup.
         self._by_name: dict[str, str] = {}
         # gemFamily → [skillId, ...], so a gem can list its sibling tiers.
@@ -124,6 +129,19 @@ class GemData:
             out.append(self._enrich(sid))
         return out
 
+    def _annotate(self, stats: list[dict], is_support: bool) -> list[dict]:
+        """Return a copy of a stat list with a human-readable `text` added to each
+        entry the description renderer can render (Layer 2). Entries it can't render
+        (internal/no-display stats, multi-stat lines) are returned unchanged with
+        just their id+value, so every existing consumer still works."""
+        if not self._desc:
+            return stats
+        out: list[dict] = []
+        for e in stats:
+            line = self._desc.text(e["id"], e.get("value"), is_support)
+            out.append({**e, "text": line} if line else dict(e))
+        return out
+
     def _enrich(self, skill_id: str) -> dict:
         s = dict(self._skills[skill_id])
         s["skill_id"] = skill_id
@@ -134,6 +152,9 @@ class GemData:
         # Stem "consum" covers consume/consumes/consuming.
         desc = (s.get("description") or "").lower()
         s["consumes_power_charges"] = "consum" in desc and "power charge" in desc
+        is_support = bool(s.get("is_support"))
+        s["stats"] = self._annotate(s.get("stats") or [], is_support)
+        s["quality_stats"] = self._annotate(s.get("quality_stats") or [], is_support)
         s["family_tiers"] = self._family_tiers(skill_id, s.get("gem_family") or [])
         return s
 
@@ -152,7 +173,12 @@ class GemData:
             {
                 "skill_id": sid,
                 "name": self._skills[sid].get("name"),
-                "stats": self._skills[sid].get("stats") or [],
+                # Sibling tiers are support gems (a gem_family is a support's tier
+                # ladder), so render their lines in the support scope.
+                "stats": self._annotate(
+                    self._skills[sid].get("stats") or [],
+                    bool(self._skills[sid].get("is_support")),
+                ),
                 "mana_multiplier": self._skills[sid].get("mana_multiplier"),
             }
             for sid in sibling_ids
@@ -161,16 +187,19 @@ class GemData:
         return tiers
 
 
-def load_gem_data(path: str | Path) -> GemData:
+def load_gem_data(path: str | Path,
+                  descriptions: StatDescriptions | None = None) -> GemData:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return GemData(data.get("skills", {}), data.get("meta", {}))
+    return GemData(data.get("skills", {}), data.get("meta", {}), descriptions)
 
 
 def load_default_gem_data() -> GemData | None:
-    """Load the gem database from the default path, or None if not present."""
+    """Load the gem database from the default path, or None if not present. Also
+    loads the stat-description renderer if its data file is present; if not, gems
+    still load and stat lines simply stay as raw ids."""
     env_path = os.environ.get("SKILL_DATA_PATH")
     path = Path(env_path) if env_path else resource_path("data", "poe2_skills.json")
     if not path.exists():
         return None
-    return load_gem_data(path)
+    return load_gem_data(path, load_default_stat_descriptions())

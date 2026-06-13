@@ -1,5 +1,6 @@
 from poe2_mcp.skills.gemdata import GemData
 from poe2_mcp.skills.luaparse import parse_skills_lua
+from poe2_mcp.skills.statdesc import StatDescriptions
 
 # Two skills in PoB2's Lua shape: a reservation buff and an attack that consumes
 # charges. Includes nested skillTypes/levels braces and an escaped quote in a
@@ -104,6 +105,29 @@ def _gem_data() -> GemData:
             "cast_time": 1,
         },
     })
+
+
+def test_enrich_attaches_rendered_text():
+    # With a StatDescriptions, _enrich attaches the in-game line to stat entries
+    # (support scope, since Fire Penetration is a support), leaving id/value intact;
+    # ids with no description keep just id/value.
+    desc = StatDescriptions(
+        support={"base_reduce_enemy_fire_resistance_%": [
+            {"limits": [[1, None]], "text": "Supported Skills Penetrate {0}% Fire Resistance"}]},
+        skill={},
+    )
+    g = GemData(parse_skills_lua(LUA), descriptions=desc)
+    fp = g.get("Fire Penetration I")
+    stat = next(s for s in fp["stats"] if s["id"] == "base_reduce_enemy_fire_resistance_%")
+    assert stat["value"] == 30
+    assert stat["text"] == "Supported Skills Penetrate 30% Fire Resistance"
+
+
+def test_enrich_without_descriptions_leaves_stats_raw():
+    g = GemData(parse_skills_lua(LUA))  # no descriptions
+    fp = g.get("Fire Penetration I")
+    stat = next(s for s in fp["stats"] if s["id"] == "base_reduce_enemy_fire_resistance_%")
+    assert "text" not in stat
 
 
 def test_lookup_by_id_and_name():

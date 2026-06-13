@@ -70,9 +70,15 @@ def classify_support(gem: dict, dims: set[str], elements: set[str], tags: set[st
       utility      — AoE, duration, speed, or no damage payload
     """
     stats = gem.get("stats") or []
-    key_stats = [(s["id"], s["value"]) for s in stats
-                 if s["id"].endswith("_final")
-                 or ("resistance" in s["id"] and ("reduce_enemy" in s["id"] or "ignore" in s["id"]))]
+    # Keep the id+value (the convention reader still wants them) and ride the
+    # rendered in-game line along when the gem db has one, so a reader sees
+    # "Supported Skills deal 35% more Damage", not just spell_damage_+%_final 35.
+    key_stats = [
+        {"id": s["id"], "value": s["value"], **({"text": s["text"]} if s.get("text") else {})}
+        for s in stats
+        if s["id"].endswith("_final")
+        or ("resistance" in s["id"] and ("reduce_enemy" in s["id"] or "ignore" in s["id"]))
+    ]
 
     # Penetration: resistance reduction OR outright ignore, matched to an element
     # the skill deals. An "ignore" flag (value True) zeroes the resistance entirely,

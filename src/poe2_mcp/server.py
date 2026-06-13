@@ -646,10 +646,14 @@ def get_skill_details(query: str) -> dict:
     get_skills ("FallingThunderPlayer"). A tier numeral is optional — "Minion Pact"
     resolves to "Minion Pact I". Returns the gem's name, tags (skill_types), base
     Spirit reservation, mechanic description, and:
-      - stats            — the gem's flat effects as {id, value}, e.g.
-                           {"id": "base_reduce_enemy_fire_resistance_%", "value": 30}.
+      - stats            — the gem's flat effects as {id, value}, usually with a
+                           rendered `text` — the in-game line, e.g. {"id":
+                           "base_reduce_enemy_fire_resistance_%", "value": 30,
+                           "text": "Supported Skills Penetrate 30% Fire Resistance"}.
                            THIS is a support's real strength — read it instead of
-                           inferring from the gem's level (see get_skills). value may
+                           inferring from the gem's level (see get_skills). When
+                           `text` is present, quote it; fall back to the raw-id
+                           convention below only for entries without one. value may
                            be a boolean: a flag-stat like {"id":
                            "hits_ignore_enemy_fire_resistance", "value": true} grants
                            the mechanic outright (here, ignore fire res entirely)
@@ -670,8 +674,9 @@ def get_skill_details(query: str) -> dict:
                            from_item / from_tree — don't recommend socketing these
       - reserves_spirit / generates_charges / consumes_power_charges — derived flags
 
-    Interpreting `stats` (these are raw PoB stat ids + bare numbers, no bundled
-    human translation — read them by convention):
+    Interpreting `stats` WITHOUT a rendered `text` (raw PoB stat ids + bare numbers
+    — read them by convention; most entries now carry `text` and need none of this,
+    but internal/no-display stats and multi-stat lines fall back to the raw id):
       - "..._+%_final" / "..._final"  → a MORE / LESS multiplier (multiplicative),
         e.g. spell_damage_+%_final 35 = "35% more"; a negative is "less". This is
         the one that bites: a plain "..._+%" WITHOUT _final is additive "increased/
