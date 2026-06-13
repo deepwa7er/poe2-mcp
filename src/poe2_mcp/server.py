@@ -31,6 +31,10 @@ Tools:
   load_community_build — load a poe.ninja build by account + character name
   list_my_characters — your own characters from poe.ninja (any league)
   load_my_character — load one of your own characters by name
+  lookup_item     — live unique/base item lookup from the community wiki
+  lookup_skill    — live active-skill lookup from the community wiki
+  lookup_mechanic — live wiki page text for a mechanic (verify/refresh explain_mechanic)
+  wiki_search     — resolve a name to community-wiki page titles
 """
 
 import os
@@ -57,6 +61,12 @@ from .crafting import (
     acquisition_model as _acquisition_model,
 )
 from .mechanics import explain as _explain_mechanic
+from .wiki import (
+    lookup_item as _wiki_item,
+    lookup_skill as _wiki_skill,
+    lookup_mechanic as _wiki_mechanic,
+    wiki_search as _wiki_search,
+)
 from .vendor_regex import (
     FRAGMENTS as _VENDOR_FRAGMENTS,
     build_regex as _vendor_build_regex,
@@ -1487,6 +1497,89 @@ def load_my_character(name: str, account: str | None = None) -> str:
     code = poeninja.fetch_character_export(_resolve_account(account), name)
     _load_build_from_xml(decode_build_code(code))
     return _loaded_build_summary(source=f"poe.ninja — {name}")
+
+
+# ---------------------------------------------------------------------------
+# Live wiki lookups (poe2wiki.net) — current-patch data the vendored files and
+# explain_mechanic don't cover. These hit the network; they return an {"error":…}
+# dict (never raise) if the wiki is unreachable.
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def lookup_item(name: str) -> dict:
+    """
+    Look up a unique or base item on the community wiki (poe2wiki.net), live.
+
+    Use this for items the server has no vendored data for — uniques and their
+    rolled stat ranges, and base-type implicits — e.g. to evaluate whether a unique
+    fits a build, or what a base provides before crafting. craft_advisor /
+    list_mods_for_base cover the affix POOL of a base from vendored data; this is
+    the wiki's item page, current patch.
+
+    name — the item's exact display name ("Headhunter", "Heavy Belt"). If there's no
+    exact match the result carries `did_you_mean` (wiki search suggestions).
+
+    Returns rarity, item class, base_item (for uniques), required_level, implicit and
+    explicit stat lines (unique values are shown as min–max ranges), and flavour.
+    Hits the network; returns an {"error": …} dict if the wiki is unreachable.
+    """
+    return _wiki_item(name)
+
+
+@mcp.tool()
+def lookup_skill(name: str) -> dict:
+    """
+    Look up an active skill on the community wiki (poe2wiki.net), live.
+
+    Complements get_skill_details (vendored PoB2 gem db: tags, supports, spirit). This
+    is the wiki's human-readable skill page — base stat lines, infusions/variants, and
+    description — useful for the current-patch wording and base numbers. For a loaded
+    build's OWN computed numbers, use get_skill_details and the recompute engine, not
+    this.
+
+    name — the skill's display name ("Spark", "Falling Thunder"). No exact match adds
+    `did_you_mean` suggestions.
+
+    Returns cast_time, max_level, description, and the skill's base stat lines. Hits the
+    network; returns an {"error": …} dict if the wiki is unreachable.
+    """
+    return _wiki_skill(name)
+
+
+@mcp.tool()
+def lookup_mechanic(query: str) -> dict:
+    """
+    Fetch the community wiki's (poe2wiki.net) page text for a game mechanic, live.
+
+    The COMPLEMENT to explain_mechanic: explain_mechanic gives the durable, curated
+    PoE1-vs-PoE2 corrections offline; this returns the wiki's current prose for a
+    mechanic, so you can VERIFY or refresh the patch-sensitive numbers explain_mechanic
+    deliberately flags (exact shock magnitude, ailment durations, thresholds, etc.).
+    Reach for it when you need a live number or a mechanic the curated topics don't
+    cover.
+
+    query — a mechanic or keyword ("Shock", "Energy Shield", "Armour", "Spirit"). It
+    follows redirects and, if there's no direct page, falls back to wiki search.
+
+    Returns the page title, plain-text extract (truncated), and related page titles.
+    Hits the network; returns an {"error": …} dict if the wiki is unreachable.
+    """
+    return _wiki_mechanic(query)
+
+
+@mcp.tool()
+def wiki_search(query: str) -> dict:
+    """
+    Search the community wiki (poe2wiki.net) for page titles matching free text, live.
+
+    A name-resolution helper for the other lookup_* tools: when you're unsure of an
+    item/skill/mechanic's exact title, search here first, then pass a returned title to
+    lookup_item / lookup_skill / lookup_mechanic.
+
+    Returns the matching page titles. Hits the network; returns an {"error": …} dict if
+    the wiki is unreachable.
+    """
+    return _wiki_search(query)
 
 
 # ---------------------------------------------------------------------------

@@ -65,6 +65,10 @@ claude mcp add poe2 -- uv --directory /path/to/poe2-mcp run poe2-mcp
 | `load_community_build` | Load a poe.ninja ladder build by account + character name |
 | `list_my_characters` | Your own characters from poe.ninja (any league) |
 | `load_my_character` | Load one of your own characters by name — no PoB export needed |
+| `lookup_item` | Live unique/base item lookup from the community wiki (current patch) |
+| `lookup_skill` | Live active-skill lookup from the community wiki |
+| `lookup_mechanic` | Live wiki page text for a mechanic — verify/refresh `explain_mechanic` |
+| `wiki_search` | Resolve a name to community-wiki page titles |
 
 ### Class region filtering
 
@@ -163,6 +167,26 @@ Topics: `gems`, `spirit`, `spirit-skills`, `ailments`, `defenses`, `resistances`
 `damage-conversion`, `crit`, `charges`, `attributes`, `ascendancy`, `support-scaling`. It's
 deliberately conceptual — durable rules and the PoE1 traps lead, and exact numbers (which churn
 per patch) are flagged as patch-sensitive rather than asserted.
+
+### Live wiki lookups
+
+The vendored data and `explain_mechanic` are durable but patch-stamped and bounded to what's
+shipped. `lookup_item`, `lookup_skill`, `lookup_mechanic`, and `wiki_search` close the gap with
+live, current-patch data from the community wiki ([poe2wiki.net](https://www.poe2wiki.net)),
+queried through its MediaWiki/Cargo API as structured JSON — no scraping, no extra dependencies.
+
+```
+lookup_item("Headhunter")      → a unique's rolled stat ranges and flavour, current patch
+lookup_item("Heavy Belt")      → a base type's implicit and item class
+lookup_skill("Spark")          → a skill's base stat lines, infusions, description
+lookup_mechanic("Shock")       → the wiki's prose on a mechanic — verify explain_mechanic's numbers
+wiki_search("energy shield")   → resolve a name to wiki page titles
+```
+
+These are the one part of the server that reaches the network per call (results are cached for an
+hour); each returns an `{"error": …}` dict rather than raising if the wiki is unreachable.
+`lookup_mechanic` is the deliberate complement to `explain_mechanic`: the latter gives the durable
+PoE1-vs-PoE2 corrections offline, the former the live numbers to verify them against.
 
 ### Vendor regex
 
