@@ -1,7 +1,7 @@
 # Plain-English stat text for gems
 
-**Status:** Phases 1 & 2 built (2026-06-13). Single- and multi-stat lines render,
-with value transforms. Phase 3 (quality-gradient phrasing) remains. The prerequisite
+**Status:** Built — all phases (2026-06-13). Single- and multi-stat lines render
+with value transforms, and quality_stats render at the 20% cap. The prerequisite
 gem enrichment landed earlier on `gem-data-enrichment`.
 
 ## What shipped
@@ -128,9 +128,11 @@ example (Fire Penetration I, entry `[82]`):
 - **Phase 1** — single-stat rendering (+ the ms→s transform). DONE.
 - **Phase 2** — full value transforms (GGG `k`/`v` index-handlers) + multi-stat
   lines (siblings sharing one line, e.g. min+max damage). DONE.
-- **Phase 3** — quality-gradient phrasing (a `quality_stats` value is per point of
-  quality; phrase as "per 20% quality" or render the gradient) + any further
-  scope-fallback refinement.
+- **Phase 3** — quality-gradient phrasing. DONE. `render_stats(..., quality=True)`
+  scales a per-1%-quality value to the 20% cap and tags the line "(at 20% quality)"
+  (e.g. `number_of_chains` 0.1 → "Chain +2 times (at 20% quality)"). The raw
+  per-point `value` is preserved; only `text` shows the at-cap payoff. Runtime-only —
+  no data regeneration needed.
 
 ## Related
 

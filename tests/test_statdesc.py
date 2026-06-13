@@ -190,6 +190,24 @@ def test_render_stats_scope_preference():
     assert sd.render_stats([{"id": "x", "value": 1}], is_support=False) == ["Plain X"]
 
 
+def test_quality_stats_render_at_20_percent():
+    # a per-1%-quality value of 0.1 is shown at the 20% cap (2), tagged accordingly
+    variants = [{"limits": [[1, None]], "text": "Chain +{0} times"}]
+    sd = _sd(skill={"single": {"number_of_chains": variants}})
+    stats = [{"id": "number_of_chains", "value": 0.1}]
+    assert sd.render_stats(stats, is_support=False, quality=True) == [
+        "Chain +2 times (at 20% quality)"]
+    # and float noise from the *20 scaling is rounded away (no "2.0000000004")
+    assert "2.0" not in sd.render_stats(stats, is_support=False, quality=True)[0]
+
+
+def test_quality_off_is_unscaled():
+    variants = [{"limits": [[1, None]], "text": "Chain +{0} times"}]
+    sd = _sd(skill={"single": {"number_of_chains": variants}})
+    stats = [{"id": "number_of_chains", "value": 2}]
+    assert sd.render_stats(stats, is_support=False) == ["Chain +2 times"]
+
+
 def test_boolean_flag_value_renders_no_gate_line():
     sd = _sd(skill={"single": {"flag": [{"limits": [[None, None]], "text": "Cannot be Frozen"}]}})
     assert sd.text("flag", True, is_support=False) == "Cannot be Frozen"

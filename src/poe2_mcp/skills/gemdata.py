@@ -129,15 +129,17 @@ class GemData:
             out.append(self._enrich(sid))
         return out
 
-    def _annotate(self, stats: list[dict], is_support: bool) -> list[dict]:
+    def _annotate(self, stats: list[dict], is_support: bool,
+                  quality: bool = False) -> list[dict]:
         """Return a copy of a stat list with a human-readable `text` added to each
         entry the description renderer can render (Layer 2). Multi-stat lines (e.g.
         min+max damage) render once on their first member; siblings and unrenderable
         entries (internal/no-display stats) keep just id+value, so every existing
-        consumer still works."""
+        consumer still works. quality=True renders per-quality-point values at the
+        20% cap and tags the line accordingly."""
         if not self._desc:
             return stats
-        lines = self._desc.render_stats(stats, is_support)
+        lines = self._desc.render_stats(stats, is_support, quality=quality)
         return [{**e, "text": line} if line else dict(e) for e, line in zip(stats, lines)]
 
     def _enrich(self, skill_id: str) -> dict:
@@ -152,7 +154,7 @@ class GemData:
         s["consumes_power_charges"] = "consum" in desc and "power charge" in desc
         is_support = bool(s.get("is_support"))
         s["stats"] = self._annotate(s.get("stats") or [], is_support)
-        s["quality_stats"] = self._annotate(s.get("quality_stats") or [], is_support)
+        s["quality_stats"] = self._annotate(s.get("quality_stats") or [], is_support, quality=True)
         s["family_tiers"] = self._family_tiers(skill_id, s.get("gem_family") or [])
         return s
 

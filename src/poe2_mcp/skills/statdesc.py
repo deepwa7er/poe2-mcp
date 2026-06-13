@@ -220,6 +220,11 @@ def parse_stat_descriptions(text: str) -> dict:
 # {0}, {1:+d}, … — a placeholder index with an optional format spec.
 _PLACEHOLDER = re.compile(r"\{(\d+)(?::([^}]+))?\}")
 
+# Gem quality caps at 20% in PoE2; a quality_stats value is per 1% of quality, so
+# its effect at the cap is value * 20. The suffix flags that scaling in the line.
+_MAX_QUALITY = 20
+_QUALITY_SUFFIX = " (at 20% quality)"
+
 
 def _limit_ok(pair, value) -> bool:
     """True if value satisfies one [lo, hi] limit pair. A missing pair (no gate)
@@ -420,16 +425,29 @@ class StatDescriptions:
                     return line
         return None
 
-    def render_stats(self, stats: list[dict], is_support: bool) -> list[str | None]:
+    def render_stats(self, stats: list[dict], is_support: bool,
+                     quality: bool = False) -> list[str | None]:
         """Render a gem's whole stat list, returning a line (or None) per entry,
         positionally aligned to `stats`. A multi-stat line is attached to its first
         member present and its siblings are marked consumed (None), so the combined
         line shows once. Multi-stat is tried before single, since the combined line
-        ("Adds X to Y Damage") supersedes either half alone."""
+        ("Adds X to Y Damage") supersedes either half alone.
+
+        quality=True renders a `quality_stats` list, whose values are PER 1% of gem
+        quality: each value is scaled to 20% quality (the cap) and the line is tagged
+        `(at 20% quality)`, so "Chain +0.1 times" becomes "Chain +2 times (at 20%
+        quality)" — the decision-relevant payoff of maxing quality."""
         scopes = self._scopes(is_support)
         valmap: dict[str, object] = {}
         for e in stats:
-            valmap.setdefault(e["id"], 1 if e.get("value") is True else e.get("value"))
+            raw = e.get("value")
+            if raw is True:
+                v = 1                                   # boolean flag, not a number
+            elif quality and isinstance(raw, (int, float)):
+                v = round(raw * _MAX_QUALITY, 4)        # per-point -> at 20% quality
+            else:
+                v = raw
+            valmap.setdefault(e["id"], v)
         consumed: set[str] = set()
         out: list[str | None] = []
         for e in stats:
@@ -455,6 +473,8 @@ class StatDescriptions:
                             line = render(variants, v, sid)
                             if line:
                                 break
+            if line and quality:
+                line += _QUALITY_SUFFIX
             out.append(line)
         return out
 

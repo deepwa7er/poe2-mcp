@@ -694,13 +694,15 @@ def get_skill_details(query: str) -> dict:
       - "..._%" / "..._+%"            → the value is a percent; sign matters.
       - "base_..."                    → a flat/base value (e.g. base_reduce_enemy_
         fire_resistance_% 30 = 30 points of penetration).
-      - quality_stats values are PER POINT of gem quality (multiply by the gem's
-        quality %); they are deliberately NOT merged into stats. Gem quality IS
-        raisable in PoE2 (Gemcutter's Prism, 1% per use to 20%) — but whether it's
-        worth it is decided HERE: read quality_stats to see what the gem's quality
-        actually does. It is frequently area/duration/utility, not damage (e.g.
-        Firestorm's quality is AoE radius), so do not call quality a damage upgrade
-        unless quality_stats shows a damage/penetration/cast-speed payload.
+      - quality_stats `value` is PER POINT of gem quality, and is deliberately NOT
+        merged into stats. Their rendered `text` already shows the effect AT 20%
+        quality (the cap), tagged "(at 20% quality)" — so "Chain +2 times (at 20%
+        quality)" comes from a per-point value of 0.1. Gem quality IS raisable in
+        PoE2 (Gemcutter's Prism, 1% per use to 20%) — but whether it's worth it is
+        decided HERE: read quality_stats to see what the gem's quality actually does.
+        It is frequently area/duration/utility, not damage (e.g. Firestorm's quality
+        is AoE radius), so do not call quality a damage upgrade unless quality_stats
+        shows a damage/penetration/cast-speed payload.
       - mana_multiplier N             → +N% to the supported skill's mana cost
         (total ×(1+N/100)); negative reduces it.
       - requires / excludes_skill_types may contain "AND"/"OR" — PoB logical
