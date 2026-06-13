@@ -58,6 +58,7 @@ claude mcp add poe2 -- uv --directory /path/to/poe2-mcp run poe2-mcp
 | `analyze_defenses` | Defensive sanity checks — uncapped/negative resistances, health pool |
 | `list_mods_for_base` | The affix pool that can roll on a base — prefix/suffix, tiers, item level, spawn weight |
 | `craft_advisor` | Build-aware advice for adding a stat to an item — open slots, tiers, risk-rated methods |
+| `explain_mechanic` | Durable model of a PoE2 game system (ailments, defenses, spirit, gems, …) — corrects PoE1 assumptions |
 | `generate_vendor_regex` | Build-aware vendor-search regex for one slot, packed under a 50-char budget |
 | `get_meta_overview` | Current build meta (ascendancy popularity) for a league, from poe.ninja |
 | `list_top_builds` | Top community builds on the poe.ninja ladder |
@@ -142,6 +143,26 @@ craft_advisor(target="cold resistance", slot="Gloves")           → can I add i
 hit chance, essence/omen, remove-and-add, replace) and is honest about its limits — slot counts
 are inferred by classifying rolled mods, and it never invents rune/essence values that aren't in
 the data. See [docs/crafting-advisor.md](docs/crafting-advisor.md) for details.
+
+### Mechanics knowledge
+
+An agent reviewing a build supplies most of its mechanics reasoning from training — and that
+training is contaminated with PoE1 assumptions that are *wrong* in PoE2 (armour blocks only
+physical, chaos bypasses energy shield, evasion only dodges attacks, support gems are a scarce
+shared pool, gems gain XP, auras reserve mana — all false today). `explain_mechanic` is the
+antidote: a curated, patch-stamped model of each core system, so the agent reasons from how the
+game actually behaves instead of reciting PoE1.
+
+```
+explain_mechanic()             → the index: headline PoE1 traps + every topic
+explain_mechanic("defenses")   → how armour/evasion/ES/block/resists really work in PoE2
+explain_mechanic("armour")     → lenient matching resolves synonyms to the right topic
+```
+
+Topics: `gems`, `spirit`, `spirit-skills`, `ailments`, `defenses`, `resistances`,
+`damage-conversion`, `crit`, `charges`, `attributes`, `ascendancy`, `support-scaling`. It's
+deliberately conceptual — durable rules and the PoE1 traps lead, and exact numbers (which churn
+per patch) are flagged as patch-sensitive rather than asserted.
 
 ### Vendor regex
 

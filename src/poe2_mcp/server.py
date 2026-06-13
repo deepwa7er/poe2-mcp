@@ -23,6 +23,7 @@ Tools:
   analyze_defenses — defensive sanity checks (resists, health pool)
   list_mods_for_base — the affix pool that can roll on a base (tiers, weights, ilvl)
   how_crafting_works — durable model of PoE2 acquisition (currencies, omens, what's targetable)
+  explain_mechanic — durable model of a PoE2 game system (ailments, defenses, spirit, gems, …)
   craft_advisor   — build-aware advice for adding a stat to an item (slots, risk-rated methods)
   generate_vendor_regex — build-aware vendor-search regex for one slot (under a char budget)
   get_meta_overview — poe.ninja ascendancy popularity for a league
@@ -55,6 +56,7 @@ from .crafting import (
     advise as _advise_craft,
     acquisition_model as _acquisition_model,
 )
+from .mechanics import explain as _explain_mechanic
 from .vendor_regex import (
     FRAGMENTS as _VENDOR_FRAGMENTS,
     build_regex as _vendor_build_regex,
@@ -139,6 +141,13 @@ PRINCIPLES:
 5. Separate levelling from endgame. Below the endgame a build is in progress;
    advice should set direction and priorities, not demand a fully optimised,
    perfectly itemised character.
+
+6. PoE2 is NOT PoE1. Your training is full of PoE1 mechanics that are wrong here
+   (armour blocks only physical, chaos bypasses ES, evasion only dodges attacks,
+   supports are a scarce pool, gems gain XP, auras reserve mana — all false). When
+   you reason about a game SYSTEM rather than the loaded build's data, call
+   explain_mechanic first (no argument for the index, or a topic like 'ailments',
+   'defenses', 'spirit'). Don't recite mechanics from memory.
 """
 
 mcp = FastMCP("poe2-mcp", instructions=_BUILD_REVIEW_GUIDANCE)
@@ -1229,6 +1238,37 @@ def how_crafting_works() -> dict:
     game. craft_advisor applies this model to a specific equipped item.
     """
     return _acquisition_model()
+
+
+@mcp.tool()
+def explain_mechanic(topic: str | None = None) -> dict:
+    """
+    Return a durable model of how a PoE2 core mechanic actually works.
+
+    Call this BEFORE reasoning about game systems from memory. The agent's PoE2
+    knowledge is contaminated with PoE1 assumptions that are flatly WRONG in current
+    PoE2 — e.g. armour blocks only physical (false: it mitigates all hit types but
+    scales against hit size), chaos bypasses Energy Shield (false: chaos hits deplete
+    ES now), evasion only dodges attacks (false: it also avoids non-AoE spells; there
+    is no spell suppression), support gems are a scarce shared pool (false: unlimited
+    copies since 0.3), gems gain XP (false: level is set by the uncut gem), and auras
+    reserve mana (false: they reserve Spirit). This tool encodes the corrections.
+
+    Call with NO argument to get the index: the headline PoE1 traps plus every topic
+    slug and summary. Call with a topic to get its full model — summary, the
+    load-bearing facts, the specific PoE1 prior it corrects, and related topics.
+    Matching is lenient (e.g. 'armour' -> defenses, 'aura' -> spirit-skills, 'shock'
+    -> ailments).
+
+    Topics: gems, spirit, spirit-skills, ailments, defenses, resistances,
+    damage-conversion, crit, charges, attributes, ascendancy, support-scaling.
+
+    Needs no build or data files — reference knowledge baked into the server.
+    Patch-sensitive (currently 0.5 / Return of the Ancients); specific numbers churn
+    per patch, so durable rules lead and exact values are flagged — verify them against
+    the live game before quoting.
+    """
+    return _explain_mechanic(topic)
 
 
 @mcp.tool()
