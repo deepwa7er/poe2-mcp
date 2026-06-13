@@ -1310,7 +1310,10 @@ def craft_advisor(target: str, slot: str | None = None, base: str | None = None)
       - whether the target is already present (then it's a Divine-to-improve case)
       - a ranked, risk-rated list of methods (open-slot add, rune-in-socket, essence on a
         fresh base, remove-and-add, replace), with an approximate Exalt-hit chance when a
-        slot is open
+        slot is open. Rune/Soul Core options quote the REAL granted line for this item's
+        slot (e.g. "+14% to Cold Resistance"), tier-ranked, with any conditional "Bonded"
+        bonus — a Desert Rune gives Fire damage on a weapon but +Fire Resistance on armour,
+        and jewellery has no rune socket so none are offered
       - an `acquisition` block: the durable model of how PoE2 acquisition works
 
     Target is a stat keyword, e.g. "cold resistance", "maximum life", "attack speed".

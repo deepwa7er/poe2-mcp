@@ -85,7 +85,7 @@ Returns, for the resolved item:
 can_roll: true   target_affix_type: suffix   already_present: []
 slots: prefix 3/3 (open 0), suffix 3/3 (open 0)
 methods:
-  [none]   Glacial Rune in an open rune socket   — grants cold res, no risk to rolled mods
+  [none]   Glacial Rune in an open rune socket   — grants +14% to Cold Resistance, no risk
   [high]   Remove-and-add (e.g. Chaos Orb)       — no open suffix; removal is random
   [medium] Replace the item                      — find/craft one that already rolls it
 ```
@@ -106,11 +106,14 @@ Consequences, surfaced in `caveats` rather than hidden:
 
 ## Known gaps
 
-- RePoE's PoE2 export has **no `stat_translations.json` or `essences.json`** — essence→mod
-  mappings aren't available, so essence/omen methods are described generically.
-- **Runes / soul cores** carry no granted values in the export, so the advisor only
-  *names* the relevant rune as a no-risk pointer (a curated map: Glacial→cold,
-  Desert→fire, Storm→lightning, Body→life, Mind→mana). It never invents numbers, and
-  it can't see whether an item has a free rune socket (socket counts aren't parsed).
+- RePoE's PoE2 export has **no `essences.json`** — essence→mod mappings aren't available,
+  so essence/omen methods are described generically.
+- **Runes / soul cores** carry no granted values in the RePoE export, so they're sourced
+  separately from PoB2's `ModRunes.lua` (vendored as `data/poe2_runes.json` by
+  `scripts/build_rune_data.py`). The advisor quotes the **real granted line for the item's
+  slot** (e.g. "+14% to Cold Resistance"), tier-ranked, with any conditional "Bonded"
+  bonus — values differ by class (a Desert Rune adds Fire damage to a weapon but +Fire
+  Resistance to armour), and jewellery has no rune socket so none are offered. It still
+  can't see whether a specific item has a *free* socket (socket counts aren't parsed).
 - Currency behaviour (how Exalt/Chaos/Divine/omens add/remove mods) is game *logic*,
   encoded in the advisor's method descriptions — not data.

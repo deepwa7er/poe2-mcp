@@ -38,7 +38,7 @@ def advise(item, target: str, craft: CraftData) -> dict:
 
     pool = craft.mods_for_base(item.base_type, keyword=target)
     target_groups = pool.get("groups", [])
-    rune = craft.rune_hint(target)
+    runes = craft.rune_options(target, rec["cls"])
 
     if not target_groups:
         out = {
@@ -47,9 +47,8 @@ def advise(item, target: str, craft: CraftData) -> dict:
             "summary": f"No rollable {target!r} affix exists for a {rec['name']} "
                        "(it may be implicit-only, unique-only, or essence/rune-only here).",
         }
-        if rune:
-            out["rune_option"] = (f"{rune} socketed into an open rune slot grants "
-                                  f"{target} with no risk to existing mods.")
+        if runes:
+            out["rune_options"] = _rune_methods(runes, rec["name"])
         out["acquisition"] = acquisition_brief()
         return out
 
@@ -77,7 +76,7 @@ def advise(item, target: str, craft: CraftData) -> dict:
 
     methods = _methods(
         craft, item, rec, ilvl, target, target_gens, target_types,
-        present_types, already_has, slots, rune,
+        present_types, already_has, slots, runes,
     )
 
     caveats = []
@@ -161,8 +160,33 @@ def _exalt_odds(craft, base_type, gen, ilvl, present_types, target_types):
     return round(100 * target / total, 1)
 
 
+def _rune_methods(runes: list[dict], base_name: str, limit: int = 3) -> list[dict]:
+    """Turn rune_options rows into no-risk craft methods quoting the real granted
+    line for this item's slot (and any conditional 'Bonded' bonus)."""
+    out: list[dict] = []
+    for r in runes[:limit]:
+        grants = "; ".join(r["grants"])
+        detail = (f"Socketing {r['rune']} ({r['type']}) into an open socket on this "
+                  f"{base_name} grants {grants} with no risk to any rolled mod — the "
+                  "cleanest fix if the item has a free rune socket. (Socket "
+                  "availability isn't in the export; check the item.)")
+        if r.get("bonded"):
+            detail += (f" Bonded bonus (only when the rune is bonded to a matching "
+                       f"item): {'; '.join(r['bonded'])}.")
+        method = {
+            "method": f"{r['rune']} in an open rune socket",
+            "risk": "none",
+            "grants": r["grants"],
+            "detail": detail,
+        }
+        if r.get("rank") is not None:
+            method["rank"] = r["rank"]
+        out.append(method)
+    return out
+
+
 def _methods(craft, item, rec, ilvl, target, target_gens, target_types,
-             present_types, already_has, slots, rune) -> list[dict]:
+             present_types, already_has, slots, runes) -> list[dict]:
     methods: list[dict] = []
 
     if already_has:
@@ -180,14 +204,7 @@ def _methods(craft, item, rec, ilvl, target, target_gens, target_types,
     gen_label = "/".join(sorted(target_gens))
 
     # Rune path — no risk to existing mods, surfaced first for stats a rune grants.
-    if rune:
-        methods.append({
-            "method": f"{rune} in an open rune socket",
-            "risk": "none",
-            "detail": f"Socketing {rune} grants {target} without touching any rolled "
-                      "mod — the cleanest fix if the item has a free rune socket. "
-                      "(Socket availability isn't in the export; check the item.)",
-        })
+    methods += _rune_methods(runes, rec["name"])
 
     if open_for_target:
         odds = _exalt_odds(craft, rec["name"], next(iter(target_gens)), ilvl,

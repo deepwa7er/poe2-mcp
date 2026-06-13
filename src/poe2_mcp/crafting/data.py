@@ -31,22 +31,11 @@ import re
 from pathlib import Path
 
 from .._resources import resource_path
+from .runes import RuneData, load_default_rune_data
 
 # Rollable explicit mods are capped at 3 prefixes + 3 suffixes on a Rare; Magic
 # allows one of each. Used by the advisor for slot accounting.
 MAX_AFFIXES = {"rare": 3, "magic": 1, "normal": 0}
-
-# Curated runes/soul-cores for the common defensive stats. The export's SoulCore
-# bases carry no granted values, so we only NAME the relevant rune — the advisor
-# points at it as a no-risk option without inventing numbers. Keyed by a substring
-# of the stat keyword.
-_RUNE_HINTS = {
-    "cold resist": "Glacial Rune",
-    "fire resist": "Desert Rune",
-    "lightning resist": "Storm Rune",
-    "maximum life": "Body Rune",
-    "maximum mana": "Mind Rune",
-}
 
 # A parenthesised range "(6-10)" / "(-25)" or a bare number "38" / "1.5".
 _NUM = re.compile(r"\(-?[0-9.]+(?:-[0-9.]+)?\)|-?\d+(?:\.\d+)?")
@@ -75,10 +64,14 @@ def _pattern_for(text: str) -> str:
 
 
 class CraftData:
-    def __init__(self, mods: list[dict], bases: dict[str, dict], meta: dict | None = None):
+    def __init__(self, mods: list[dict], bases: dict[str, dict], meta: dict | None = None,
+                 runes: "RuneData | None" = None):
         self.mods = mods
         self.bases = bases
         self.meta = meta or {}
+        # Optional rune/soul-core grants (real per-slot values). When present,
+        # rune_options returns concrete granted lines; absent, it returns [].
+        self._runes = runes
         self._build_classifier()
 
     def _build_classifier(self) -> None:
@@ -188,26 +181,26 @@ class CraftData:
 
     # -- runes --------------------------------------------------------------
 
-    @staticmethod
-    def rune_hint(keyword: str) -> str | None:
-        """Name the rune/soul-core that grants `keyword`, if it's one we track."""
-        kw = keyword.lower()
-        for frag, rune in _RUNE_HINTS.items():
-            if frag in kw:
-                return rune
-        return None
+    def rune_options(self, keyword: str, item_class: str) -> list[dict]:
+        """Runes/soul cores that grant `keyword` for `item_class`, with their real
+        per-slot values (e.g. "+14% to Cold Resistance"). Empty if no rune data is
+        loaded or none match."""
+        if self._runes is None:
+            return []
+        return self._runes.grants(keyword, item_class)
 
 
-def load_craft_data(path: str | Path) -> CraftData:
+def load_craft_data(path: str | Path, runes: "RuneData | None" = None) -> CraftData:
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
-    return CraftData(data.get("mods", []), data.get("bases", {}), data.get("meta", {}))
+    return CraftData(data.get("mods", []), data.get("bases", {}), data.get("meta", {}), runes)
 
 
 def load_default_craft_data() -> CraftData | None:
-    """Load the crafting database from the default path, or None if absent."""
+    """Load the crafting database from the default path, or None if absent. Also
+    loads the rune data if present, so craft advice can quote real rune values."""
     env_path = os.environ.get("CRAFT_DATA_PATH")
     path = Path(env_path) if env_path else resource_path("data", "poe2_crafting.json")
     if not path.exists():
         return None
-    return load_craft_data(path)
+    return load_craft_data(path, load_default_rune_data())

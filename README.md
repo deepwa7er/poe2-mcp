@@ -145,8 +145,10 @@ craft_advisor(target="cold resistance", slot="Gloves")           → can I add i
 
 `craft_advisor` ranks methods by risk (rune-in-socket, Exalt-to-open-slot with an approximate
 hit chance, essence/omen, remove-and-add, replace) and is honest about its limits — slot counts
-are inferred by classifying rolled mods, and it never invents rune/essence values that aren't in
-the data. See [docs/crafting-advisor.md](docs/crafting-advisor.md) for details.
+are inferred by classifying rolled mods, and it never invents essence values that aren't in
+the data. Rune/Soul Core options quote the real granted line for the item's slot (e.g. "+14% to
+Cold Resistance"), tier-ranked with any conditional "Bonded" bonus. See
+[docs/crafting-advisor.md](docs/crafting-advisor.md) for details.
 
 ### Mechanics knowledge
 
@@ -212,6 +214,8 @@ The passive tree is generated from Path of Building 2's bundled tree data (`src/
 ## Crafting data
 
 The affix pool and base types are sourced from the [RePoE-fork PoE2 export](https://repoe-fork.github.io/poe2/) — static JSON extracted from the client (GGG ships no PoE2 data export, and poe2db has no data API). `scripts/build_craft_data.py` fetches and slims it to the bundled `data/poe2_crafting.json`. The pool drifts between patches; regenerate with `uv run python scripts/build_craft_data.py`, or point `CRAFT_DATA_PATH` at an alternative file.
+
+Rune and Soul Core grants (which the RePoE export omits) come from PoB2's `src/Data/ModRunes.lua`, where they're stored per item class already rendered to English. `scripts/build_rune_data.py` parses it to the bundled `data/poe2_runes.json` (rune → item class → granted lines, type, rank), which `craft_advisor` uses to quote real per-slot values. Regenerate with `uv run python scripts/build_rune_data.py`, or override with `RUNE_DATA_PATH`.
 
 ## Skill & stat data
 

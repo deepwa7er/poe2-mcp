@@ -1,7 +1,15 @@
 from poe2_mcp.crafting.data import CraftData, _pattern_for
 from poe2_mcp.crafting.advisor import advise
 from poe2_mcp.crafting.knowledge import acquisition_model, acquisition_brief
+from poe2_mcp.crafting.runes import RuneData
 from poe2_mcp.pob.models import Item
+
+# A tiny rune fixture: a cold-res rune on the generic "armour" class (so it
+# resolves for gloves via the armour fallback) and nothing for rings.
+_RUNES = RuneData({
+    "Glacial Rune": {"armour": {"type": "Rune", "mods": ["+14% to Cold Resistance"],
+                                "bonded": ["+20 to maximum Life"], "rank": 15}},
+})
 
 
 def _mod(type_, gen, name, lvl, text, sw):
@@ -31,7 +39,8 @@ BASES = {
 
 
 def _cd() -> CraftData:
-    return CraftData([dict(m) for m in MODS], {k: dict(v) for k, v in BASES.items()})
+    return CraftData([dict(m) for m in MODS], {k: dict(v) for k, v in BASES.items()},
+                     runes=_RUNES)
 
 
 # -- pattern / classification ------------------------------------------------
@@ -129,8 +138,20 @@ def test_advise_open_slot_recommends_add():
     assert r["slots"]["open_suffix"] >= 1
     methods = [m["method"] for m in r["methods"]]
     assert any("Exalted Orb" in m for m in methods)
-    # Glacial Rune is a tracked cold-res rune, surfaced as a no-risk option.
-    assert any("Glacial Rune" in m for m in methods)
+    # A ring has no rune socket, so no rune method is offered.
+    assert not any("Rune" in m for m in methods)
+
+
+def test_advise_rune_option_quotes_real_value():
+    cd = _cd()
+    # Gloves resolve to the rune's "armour" class; the option quotes the real line.
+    it = _item("Leather Gloves", ["+50 to maximum Life"])
+    r = advise(it, "cold resistance", cd)
+    rune = next(m for m in r["methods"] if "Glacial Rune" in m["method"])
+    assert rune["risk"] == "none"
+    assert rune["grants"] == ["+14% to Cold Resistance"]
+    assert "+14% to Cold Resistance" in rune["detail"]
+    assert "Bonded" in rune["detail"]  # conditional bonus noted
 
 
 def test_advise_full_item_warns_remove_or_replace():
