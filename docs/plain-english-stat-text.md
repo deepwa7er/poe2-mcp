@@ -1,25 +1,40 @@
 # Plain-English stat text for gems
 
-**Status:** Phase 1 built (2026-06-13). Single-stat lines render; multi-stat lines
-and most value transforms remain (Phases 2–3 below). The prerequisite gem
-enrichment landed earlier on `gem-data-enrichment`.
+**Status:** Phases 1 & 2 built (2026-06-13). Single- and multi-stat lines render,
+with value transforms. Phase 3 (quality-gradient phrasing) remains. The prerequisite
+gem enrichment landed earlier on `gem-data-enrichment`.
 
-## What Phase 1 shipped
+## What shipped
 
 - `skills/statdesc.py` — a recursive-descent parser for PoB2's stat-description
-  Lua (`parse_stat_descriptions`), plus the runtime `StatDescriptions` /
-  `render` that turn a stat id+value into the in-game line.
+  Lua (`parse_stat_descriptions` → `{single, multi}`), plus the runtime
+  `StatDescriptions` (`render`, `render_multi`, `render_stats`) that turns a stat
+  id+value into the in-game line.
 - `scripts/build_stat_data.py` — fetches the three StatDescriptions files, keeps
-  the single-stat lines, and vendors `data/poe2_stat_descriptions.json` slimmed to
-  the ids `poe2_skills.json` references, in two scopes (`support` / `skill`).
-- `GemData._enrich` attaches a `text` to each `stats` / `quality_stats` /
-  `family_tiers` entry it can render; `id`/`value` are untouched, so existing
-  consumers are unaffected. `get_skill_details` and `recommend_supports` surface it.
+  single- and multi-stat lines (with their value transforms), and vendors
+  `data/poe2_stat_descriptions.json` slimmed to the ids `poe2_skills.json`
+  references, in two scopes (`support` / `skill`), each holding `single` + `multi`.
+- `GemData._enrich` calls `render_stats` over each `stats` / `quality_stats` /
+  `family_tiers` list and attaches a `text` per entry; `id`/`value` are untouched,
+  so existing consumers are unaffected. `get_skill_details` and `recommend_supports`
+  surface it.
 
-Coverage: of the ~1,138 referenced ids that have any tooltip line, Phase 1 renders
-~937 (82%); the rest are multi-stat lines (~200, Phase 2) and a long tail of
-internal/no-display stats that correctly stay raw. The one transform applied is
-milliseconds→seconds (`*_ms`); per-minute rates and ÷100 fractions are Phase 2.
+Coverage: ~1,135 of the ~1,138 referenced ids that have any tooltip line now render
+— effectively complete on describable lines; the rest are internal/no-display stats
+that correctly stay raw, plus a few lines gated on hash/index handlers we can't
+resolve (omitted rather than rendered wrong).
+
+**Phase 2 specifics:**
+- *Multi-stat lines* — entries keyed by several ids (e.g. min+max damage on "Adds X
+  to Y Damage"). Vendored as `multi` lists; `render_stats` keys them by member id,
+  renders once when all sibling values are present, attaches the line to the first
+  member, and marks the siblings consumed (their entries keep raw id/value).
+- *Value transforms* — the real GGG index-handlers (`k`/`v` on each variant), not a
+  heuristic: `negate` (shows "less"/"reduced" as a positive number),
+  `milliseconds_to_seconds`, `per_minute_to_per_second`, `divide_by_one_hundred`,
+  and the divide/double/offset family, with `_Ndp` decimal-place rounding. The old
+  `*_ms`-suffix ÷1000 guess is kept only as a fallback when a line carries no handler.
+  Non-numeric handlers (passive/skill/hash indices) mark a line unrenderable.
 
 ## Problem
 
@@ -110,12 +125,12 @@ example (Fire Penetration I, entry `[82]`):
 
 ## Phasing
 
-- **Phase 1** — single-stat rendering (+ the ms→s transform). DONE. Covers the bulk
-  of support and flat-effect lines (the stuff that drives gem advice). Parser +
-  renderer + slim vendoring + tests + regen.
-- **Phase 2** — remaining value transforms (per-minute, ÷100 fractions) + multi-stat
-  lines (siblings sharing one line, e.g. min+max damage).
-- **Phase 3** — quality-gradient phrasing + full scope-fallback chain.
+- **Phase 1** — single-stat rendering (+ the ms→s transform). DONE.
+- **Phase 2** — full value transforms (GGG `k`/`v` index-handlers) + multi-stat
+  lines (siblings sharing one line, e.g. min+max damage). DONE.
+- **Phase 3** — quality-gradient phrasing (a `quality_stats` value is per point of
+  quality; phrase as "per 20% quality" or render the gradient) + any further
+  scope-fallback refinement.
 
 ## Related
 

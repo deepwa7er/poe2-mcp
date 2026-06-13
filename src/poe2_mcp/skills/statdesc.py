@@ -154,8 +154,10 @@ def _norm_bound(b):
 
 def _collect_variants(block) -> list[dict]:
     """Flatten an entry's descriptor block into an ordered list of variants, each
-    {limits: [[lo,hi], ...], text: str}. The block nests a level deeper than the
-    {limit,text} leaves, so descend until we hit dicts carrying a `text`."""
+    {limits: [[lo,hi], ...], text: str, transforms?: {placeholder: [handler, arg]}}.
+    The block nests a level deeper than the {limit,text} leaves, so descend until we
+    hit dicts carrying a `text`; that leaf's own integer children are the per-
+    placeholder value transforms (e.g. {"1": ["milliseconds_to_seconds", 1]})."""
     out: list[dict] = []
 
     def walk(node):
@@ -167,7 +169,17 @@ def _collect_variants(block) -> list[dict]:
                 [_norm_bound(pair.get(1)), _norm_bound(pair.get(2))]
                 for pair in _int_keys(limit)
             ]
-            out.append({"limits": limits, "text": node["text"]})
+            # Integer-keyed children of a text leaf are {k=handler, v=arg} transform
+            # specs, one per 1-based placeholder index.
+            transforms = {
+                str(ik): [node[ik]["k"], node[ik].get("v")]
+                for ik in node
+                if isinstance(ik, int) and isinstance(node[ik], dict) and "k" in node[ik]
+            }
+            v = {"limits": limits, "text": node["text"]}
+            if transforms:
+                v["transforms"] = transforms
+            out.append(v)
             return
         for child in _int_keys(node):
             walk(child)
@@ -176,28 +188,29 @@ def _collect_variants(block) -> list[dict]:
     return out
 
 
-def parse_stat_descriptions(text: str, single_stat_only: bool = True) -> dict[str, list[dict]]:
-    """Parse a PoB2 stat-description .lua into {stat_id: [variant, ...]}.
+def parse_stat_descriptions(text: str) -> dict:
+    """Parse a PoB2 stat-description .lua into {"single": {...}, "multi": [...]}.
 
-    Each variant is {limits, text}; for single-stat entries (the Phase-1 scope)
-    limits has exactly one [lo, hi] pair, the gate on that stat's value. Entries
-    keyed by more than one stat id are skipped when single_stat_only (default),
-    since rendering them needs sibling values we don't have in isolation.
-    """
+    `single` maps a stat id to its variants (each {limits, text, transforms?}); these
+    render from one id+value. `multi` is a list of {stats, variants} entries keyed by
+    several stat ids (e.g. min+max damage on one line) — they render only when all the
+    sibling values are present, so the runtime keys them by member id and renders the
+    line once. First single entry wins per id (gem scope is the primary source)."""
     root = _LuaTableParser(text).parse_return()
-    out: dict[str, list[dict]] = {}
+    single: dict[str, list[dict]] = {}
+    multi: list[dict] = []
     for entry in _int_keys(root):
         if not isinstance(entry, dict):
             continue
         stats = _int_keys(entry.get("stats", {}))
-        if not stats or (single_stat_only and len(stats) != 1):
-            continue
         variants = [v for v in _collect_variants(entry) if v["text"]]
-        if not variants:
+        if not stats or not variants:
             continue
-        # First entry wins per id (the gem-scope file is the primary source).
-        out.setdefault(stats[0], variants)
-    return out
+        if len(stats) == 1:
+            single.setdefault(stats[0], variants)
+        else:
+            multi.append({"stats": stats, "variants": variants})
+    return {"single": single, "multi": multi}
 
 
 # ---------------------------------------------------------------------------
@@ -208,27 +221,106 @@ def parse_stat_descriptions(text: str, single_stat_only: bool = True) -> dict[st
 _PLACEHOLDER = re.compile(r"\{(\d+)(?::([^}]+))?\}")
 
 
-def _matches(limits: list, value) -> bool:
-    """True if value satisfies the single limit pair for a single-stat variant.
-    A missing/empty limit (no gate) always matches. A non-numeric bound (PoB's
-    rare `!` negation sentinel) can't be evaluated here, so the variant is skipped
-    and rendering falls through to the next one."""
-    if not limits:
+def _limit_ok(pair, value) -> bool:
+    """True if value satisfies one [lo, hi] limit pair. A missing pair (no gate)
+    always matches. A non-numeric bound (PoB's rare `!` negation sentinel) can't be
+    evaluated, so it fails and rendering falls through to the next variant."""
+    if not pair:
         return True
-    lo, hi = limits[0]
-    if lo is not None:
-        if not isinstance(lo, (int, float)) or value < lo:
-            return False
-    if hi is not None:
-        if not isinstance(hi, (int, float)) or value > hi:
-            return False
+    lo, hi = pair
+    if lo is not None and (not isinstance(lo, (int, float)) or value < lo):
+        return False
+    if hi is not None and (not isinstance(hi, (int, float)) or value > hi):
+        return False
     return True
 
 
+# GGG index-handlers (the `k` on a transform spec) → how to turn the raw stored
+# value into the figure the tooltip shows. Non-numeric handlers (passive/skill/
+# hash indices we can't resolve) are absent and make a line unrenderable, so we
+# omit text rather than print a meaningless number.
+def _apply_handler(k: str, x):
+    if not isinstance(x, (int, float)):
+        return None
+    if k in ("canonical_line", "canonical_stat"):
+        return x
+    if k == "negate":
+        return -x
+    if k == "double":
+        return x * 2
+    if k == "negate_and_double":
+        return -(x * 2)
+    if k == "times_twenty":
+        return x * 20
+    if k == "multiply_by_four":
+        return x * 4
+    if k == "subtract_one":
+        return x - 1
+    if k == "add_one":
+        return x + 1
+    if k == "plus_two_hundred":
+        return x + 200
+    if k == "one_hundred_divide_by_value":
+        return 100 / x if x else x
+    if k == "divide_by_twenty_then_double_0dp":
+        return x / 10
+    if k == "divide_by_one_hundred_and_negate":
+        return -(x / 100)
+    if k.startswith("milliseconds_to_seconds"):
+        return x / 1000
+    if k.startswith("per_minute_to_per_second"):
+        return x / 60
+    if k.startswith("deciseconds_to_seconds") or k.startswith("divide_by_ten"):
+        return x / 10
+    if k.startswith("divide_by_one_hundred"):
+        return x / 100
+    if k.startswith("divide_by_two"):
+        return x / 2
+    if k == "divide_by_three":
+        return x / 3
+    if k == "divide_by_four":
+        return x / 4
+    if k == "divide_by_five":
+        return x / 5
+    if k.startswith("divide_by_fifteen"):
+        return x / 15
+    if k == "divide_by_twenty":
+        return x / 20
+    if k == "divide_by_fifty":
+        return x / 50
+    return None  # unknown / non-numeric handler -> unrenderable
+
+
+_DP_RE = re.compile(r"_(\d)dp")
+
+
+def _display(transforms: dict | None, idx1: int, raw, stat_id: str):
+    """The display figure for placeholder idx1 (1-based): apply the variant's
+    transform handler if any, else the millisecond-suffix fallback, else the raw
+    value. Returns the sentinel _UNRENDERABLE if a handler exists but can't be
+    evaluated (so the whole line is dropped)."""
+    spec = (transforms or {}).get(str(idx1))
+    if spec:
+        n = _apply_handler(spec[0], raw)
+        if n is None:
+            return _UNRENDERABLE
+        m = _DP_RE.search(spec[0])
+        if m:
+            n = round(n, int(m.group(1)))
+        elif isinstance(n, float) and not n.is_integer():
+            n = round(n, 2)
+        return n
+    if isinstance(raw, (int, float)) and stat_id.endswith("_ms"):
+        return round(raw / 1000, 3)
+    return raw
+
+
+_UNRENDERABLE = object()
+
+
 def _fmt_number(value, spec: str | None) -> str:
-    """Format a value for substitution. Phase 1 honours only the sign-forcing
-    spec (`+d`/`+`); everything else renders the raw number, trimming a trailing
-    `.0` so ints read cleanly."""
+    """Format a value for substitution: honour the sign-forcing spec (`+d`/`+`) and
+    trim a trailing `.0` so ints read cleanly."""
     if isinstance(value, float) and value.is_integer():
         value = int(value)
     if spec and spec.startswith("+"):
@@ -236,34 +328,60 @@ def _fmt_number(value, spec: str | None) -> str:
     return str(value)
 
 
-def render(variants: list[dict], value, display=None) -> str | None:
-    """Render the in-game line for a single-stat value, or None if no variant's
-    limit matches. Picks the first matching variant (limits are ordered most- to
-    least-specific in the source) and substitutes its placeholders.
+def _substitute(text: str, displays: dict) -> str:
+    """Replace {i}/{i:spec} placeholders with their display values."""
+    def repl(m):
+        idx = int(m.group(1))
+        if idx not in displays:
+            return m.group(0)
+        return _fmt_number(displays[idx], m.group(2))
+    return _PLACEHOLDER.sub(repl, text)
 
-    `value` is matched against the limits; `display` (defaulting to `value`) is
-    what's substituted — they differ when a unit transform applies (e.g. a
-    millisecond stat matches on its raw value but displays the seconds figure)."""
-    if not variants:
-        return None
-    if display is None:
-        display = value
+
+def render(variants: list[dict], value, stat_id: str = "") -> str | None:
+    """Render the in-game line for a single-stat value: pick the first variant whose
+    limit matches, apply its value transform, and substitute. None if nothing
+    matches or the matched variant's handler is unrenderable."""
     for v in variants:
-        if _matches(v.get("limits") or [], value):
-            return _PLACEHOLDER.sub(
-                lambda m: _fmt_number(display, m.group(2)), v["text"]
-            )
+        limits = v.get("limits") or []
+        if not _limit_ok(limits[0] if limits else None, value):
+            continue
+        disp = _display(v.get("transforms"), 1, value, stat_id)
+        if disp is _UNRENDERABLE:
+            return None
+        return _substitute(v["text"], {0: disp})
     return None
 
 
-def _display_value(stat_id: str, value):
-    """Convert a raw stat value to the figure the tooltip shows. Phase 1 handles
-    the one clean, common unit transform: millisecond stats (`*_ms`) render in
-    seconds. Other transforms (per-minute rates, ÷100 fractions) are Phase 2 and
-    render raw for now."""
-    if isinstance(value, (int, float)) and stat_id.endswith("_ms"):
-        return value / 1000
-    return value
+def render_multi(stats_ids: list[str], variants: list[dict], valmap: dict) -> str | None:
+    """Render a multi-stat line — one that needs several sibling values (e.g. min +
+    max damage). None unless every sibling value is present, a variant's per-stat
+    limits all match, and every placeholder's transform is renderable."""
+    values = [valmap.get(sid) for sid in stats_ids]
+    if any(not isinstance(v, (int, float)) for v in values):
+        return None
+    for var in variants:
+        limits = var.get("limits") or []
+        if not all(_limit_ok(limits[i] if i < len(limits) else None, values[i])
+                   for i in range(len(stats_ids))):
+            continue
+        displays = {}
+        for i, sid in enumerate(stats_ids):
+            d = _display(var.get("transforms"), i + 1, values[i], sid)
+            if d is _UNRENDERABLE:
+                return None
+            displays[i] = d
+        return _substitute(var["text"], displays)
+    return None
+
+
+def _multi_index(multi: list[dict]) -> dict[str, list[dict]]:
+    """Index multi-stat entries by each member stat id, for O(1) lookup at render."""
+    idx: dict[str, list[dict]] = {}
+    for entry in multi:
+        for sid in entry["stats"]:
+            idx.setdefault(sid, []).append(entry)
+    return idx
 
 
 class StatDescriptions:
@@ -271,35 +389,74 @@ class StatDescriptions:
 
     Wording differs by scope: a support's lines read "Supported Skills deal …"
     (the `support` scope, from PoB2's gem_stat_descriptions), while an active
-    skill's own stats read plain "… increased …" (the `skill` scope). text()
-    tries the scope that matches the gem first, then the other as a fallback —
-    so a line still renders if it only exists in the other scope."""
+    skill's own stats read plain "… increased …" (the `skill` scope). Lookups try
+    the scope matching the gem first, then the other as a fallback. Each scope holds
+    `single` (one id → variants) and `multi` (entries spanning several ids)."""
 
-    def __init__(self, support: dict[str, list[dict]], skill: dict[str, list[dict]],
-                 meta: dict | None = None):
-        self._support = support
-        self._skill = skill
+    def __init__(self, support: dict, skill: dict, meta: dict | None = None):
+        self._support = support.get("single", {})
+        self._skill = skill.get("single", {})
+        self._support_multi = _multi_index(support.get("multi", []))
+        self._skill_multi = _multi_index(skill.get("multi", []))
         self.meta = meta or {}
 
+    def _scopes(self, is_support: bool):
+        """(single, multi_index) pairs in priority order for a support vs. active."""
+        if is_support:
+            return ((self._support, self._support_multi), (self._skill, self._skill_multi))
+        return ((self._skill, self._skill_multi), (self._support, self._support_multi))
+
     def text(self, stat_id: str, value, is_support: bool) -> str | None:
-        """The rendered line for one stat id+value, or None if there's no single-
-        stat description for it (internal/no-display stats, and the multi-stat
-        lines Phase 1 doesn't render, both return None and keep the raw id)."""
-        # Boolean flag-stats ("Cannot be Frozen") carry no number; match the
-        # no-gate variant with a neutral 1 so the placeholder-free text renders.
+        """The rendered single-stat line for one id+value, or None. (Multi-stat
+        lines need sibling values — use render_stats for a gem's full stat list.)"""
         v = 1 if value is True else value
         if not isinstance(v, (int, float)):
             return None
-        primary, secondary = (
-            (self._support, self._skill) if is_support else (self._skill, self._support)
-        )
-        for scope in (primary, secondary):
-            variants = scope.get(stat_id)
+        for single, _ in self._scopes(is_support):
+            variants = single.get(stat_id)
             if variants:
-                line = render(variants, v, _display_value(stat_id, v))
+                line = render(variants, v, stat_id)
                 if line:
                     return line
         return None
+
+    def render_stats(self, stats: list[dict], is_support: bool) -> list[str | None]:
+        """Render a gem's whole stat list, returning a line (or None) per entry,
+        positionally aligned to `stats`. A multi-stat line is attached to its first
+        member present and its siblings are marked consumed (None), so the combined
+        line shows once. Multi-stat is tried before single, since the combined line
+        ("Adds X to Y Damage") supersedes either half alone."""
+        scopes = self._scopes(is_support)
+        valmap: dict[str, object] = {}
+        for e in stats:
+            valmap.setdefault(e["id"], 1 if e.get("value") is True else e.get("value"))
+        consumed: set[str] = set()
+        out: list[str | None] = []
+        for e in stats:
+            sid = e["id"]
+            if sid in consumed:
+                out.append(None)
+                continue
+            line = None
+            for single, multi_idx in scopes:
+                for entry in multi_idx.get(sid, []):
+                    line = render_multi(entry["stats"], entry["variants"], valmap)
+                    if line:
+                        consumed.update(entry["stats"])
+                        break
+                if line:
+                    break
+            if line is None:
+                v = valmap.get(sid)
+                if isinstance(v, (int, float)):
+                    for single, _ in scopes:
+                        variants = single.get(sid)
+                        if variants:
+                            line = render(variants, v, sid)
+                            if line:
+                                break
+            out.append(line)
+        return out
 
 
 def load_stat_descriptions(path: str | Path) -> StatDescriptions:

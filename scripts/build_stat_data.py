@@ -57,8 +57,27 @@ def _referenced_ids(skills_path: Path) -> set[str]:
     return ids
 
 
-def _slim(desc: dict, ids: set[str]) -> dict:
-    return {k: v for k, v in desc.items() if k in ids}
+def _merge(base: dict, over: dict) -> dict:
+    """Merge two parsed scopes ({single, multi}); `over` wins for single-stat ids,
+    and its multi entries are tried first."""
+    return {
+        "single": {**base["single"], **over["single"]},
+        "multi": over["multi"] + base["multi"],
+    }
+
+
+def _slim(scope: dict, ids: set[str]) -> dict:
+    """Drop everything not referenced by the gem db: single ids not in `ids`, and
+    multi entries with no member id in `ids`."""
+    return {
+        "single": {k: v for k, v in scope["single"].items() if k in ids},
+        "multi": [e for e in scope["multi"] if any(s in ids for s in e["stats"])],
+    }
+
+
+def _covered(scope: dict) -> set[str]:
+    members = {s for e in scope["multi"] for s in e["stats"]}
+    return set(scope["single"]) | members
 
 
 def main() -> None:
@@ -77,27 +96,27 @@ def main() -> None:
         master = parse_stat_descriptions(fetch("stat_descriptions.lua"))
 
     # support scope: gem wording. skill scope: skill over master (skill wins).
-    support_scope = gem
-    skill_scope = {**master, **skill}
-
-    support_slim = _slim(support_scope, ids)
-    skill_slim = _slim(skill_scope, ids)
-    covered = ids & (set(support_slim) | set(skill_slim))
+    support_slim = _slim(gem, ids)
+    skill_slim = _slim(_merge(master, skill), ids)
+    covered = ids & (_covered(support_slim) | _covered(skill_slim))
     print(f"  referenced ids: {len(ids)}")
-    print(f"  support-scope lines: {len(support_slim)}  skill-scope lines: {len(skill_slim)}")
+    print(f"  support single/multi: {len(support_slim['single'])}/{len(support_slim['multi'])}"
+          f"  skill single/multi: {len(skill_slim['single'])}/{len(skill_slim['multi'])}")
     print(f"  ids with a rendered line: {len(covered)} ({100 * len(covered) // len(ids)}%)")
 
     payload = {
         "meta": {
             "source": f"{REPO}@{REF}/src/Data/StatDescriptions",
             "generated": date.today().isoformat(),
-            "phase": "1 (single-stat lines; multi-stat fall back to the raw id)",
+            "phase": "2 (single + multi-stat lines, with value transforms)",
             "referenced_ids": len(ids),
             "covered_ids": len(covered),
         },
         "scopes": {
-            "support": dict(sorted(support_slim.items())),
-            "skill": dict(sorted(skill_slim.items())),
+            "support": {"single": dict(sorted(support_slim["single"].items())),
+                        "multi": support_slim["multi"]},
+            "skill": {"single": dict(sorted(skill_slim["single"].items())),
+                      "multi": skill_slim["multi"]},
         },
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)

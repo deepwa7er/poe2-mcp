@@ -686,7 +686,7 @@ def get_skill_details(query: str) -> dict:
 
     Interpreting `stats` WITHOUT a rendered `text` (raw PoB stat ids + bare numbers
     — read them by convention; most entries now carry `text` and need none of this,
-    but internal/no-display stats and multi-stat lines fall back to the raw id):
+    the fallback is a long tail of internal/no-display stats that have no in-game line):
       - "..._+%_final" / "..._final"  → a MORE / LESS multiplier (multiplicative),
         e.g. spell_damage_+%_final 35 = "35% more"; a negative is "less". This is
         the one that bites: a plain "..._+%" WITHOUT _final is additive "increased/

@@ -112,9 +112,10 @@ def test_enrich_attaches_rendered_text():
     # (support scope, since Fire Penetration is a support), leaving id/value intact;
     # ids with no description keep just id/value.
     desc = StatDescriptions(
-        support={"base_reduce_enemy_fire_resistance_%": [
+        support={"single": {"base_reduce_enemy_fire_resistance_%": [
             {"limits": [[1, None]], "text": "Supported Skills Penetrate {0}% Fire Resistance"}]},
-        skill={},
+            "multi": []},
+        skill={"single": {}, "multi": []},
     )
     g = GemData(parse_skills_lua(LUA), descriptions=desc)
     fp = g.get("Fire Penetration I")

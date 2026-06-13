@@ -131,16 +131,14 @@ class GemData:
 
     def _annotate(self, stats: list[dict], is_support: bool) -> list[dict]:
         """Return a copy of a stat list with a human-readable `text` added to each
-        entry the description renderer can render (Layer 2). Entries it can't render
-        (internal/no-display stats, multi-stat lines) are returned unchanged with
-        just their id+value, so every existing consumer still works."""
+        entry the description renderer can render (Layer 2). Multi-stat lines (e.g.
+        min+max damage) render once on their first member; siblings and unrenderable
+        entries (internal/no-display stats) keep just id+value, so every existing
+        consumer still works."""
         if not self._desc:
             return stats
-        out: list[dict] = []
-        for e in stats:
-            line = self._desc.text(e["id"], e.get("value"), is_support)
-            out.append({**e, "text": line} if line else dict(e))
-        return out
+        lines = self._desc.render_stats(stats, is_support)
+        return [{**e, "text": line} if line else dict(e) for e, line in zip(stats, lines)]
 
     def _enrich(self, skill_id: str) -> dict:
         s = dict(self._skills[skill_id])
