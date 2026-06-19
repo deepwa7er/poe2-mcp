@@ -36,3 +36,29 @@ def test_decode_tolerates_whitespace_and_missing_padding():
 def test_decode_garbage_raises():
     with pytest.raises(Exception):
         decode_build_code("not-a-valid-pob-code!!!")
+
+
+def test_decode_from_file_path(tmp_path):
+    co = zlib.compressobj(9, zlib.DEFLATED, -15)
+    raw = co.compress(SAMPLE_XML.encode()) + co.flush()
+    f = tmp_path / "pob_code.txt"
+    f.write_text(_urlsafe(raw) + "\n")
+    assert decode_build_code(str(f)) == SAMPLE_XML
+
+
+def test_decode_tolerates_internal_whitespace():
+    # A line-wrapped paste: newlines in the middle of the base64 token.
+    code = _urlsafe(zlib.compress(SAMPLE_XML.encode()))
+    wrapped = "\n".join(code[i : i + 40] for i in range(0, len(code), 40))
+    assert decode_build_code(wrapped) == SAMPLE_XML
+
+
+def test_truncated_code_raises_clear_value_error():
+    code = _urlsafe(zlib.compress(SAMPLE_XML.encode()))
+    with pytest.raises(ValueError, match="truncated or corrupted"):
+        decode_build_code(code[:-12])
+
+
+def test_non_base64_raises_clear_value_error():
+    with pytest.raises(ValueError, match="not valid base64"):
+        decode_build_code("@@@ this is clearly not base64 @@@")

@@ -197,11 +197,16 @@ def _require_build() -> Build:
 @mcp.tool()
 def load_build(code: str) -> str:
     """
-    Load a Path of Building export code or pobb.in share link.
+    Load a Path of Building export code, pobb.in share link, or local file path.
 
     Accepts:
       - A raw PoB export code (the long base64 string from File > Share > Copy code)
       - A pobb.in URL (e.g. https://pobb.in/AbCdEfGh)
+      - A path to a local file containing the export code (e.g. pob_code.txt)
+
+    PREFER a file path or pobb.in link when you have one: a raw export code is a
+    ~10k-character base64 blob, and passing it through this argument can corrupt it
+    (a single altered character breaks decoding). A file path avoids that entirely.
 
     Call this first before using any other tool.
     """
