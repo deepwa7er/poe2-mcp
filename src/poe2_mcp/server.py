@@ -54,7 +54,7 @@ from .skills import (
 )
 from .pob_engine import get_engine, PobEngineError, PRESETS
 from .diagnostics import analyze_defenses as _analyze_defenses, summarize_points
-from .community import poeninja
+from .community import archetype, poeninja
 from .crafting import (
     load_default_craft_data,
     advise as _advise_craft,
@@ -1458,6 +1458,122 @@ def list_top_builds(league: str | None = None, limit: int = 20) -> list[dict]:
     limit caps the number of rows (the ladder page holds ~100). No build needs to be loaded.
     """
     return poeninja.list_top_builds(league=league, limit=limit)
+
+
+@mcp.tool()
+def analyze_archetype(
+    skill: str,
+    league: str | None = None,
+    core_threshold: float = 0.6,
+    support_builds: int = 12,
+) -> dict:
+    """
+    Find the CORE vs TECH elements of builds centred on a given skill.
+
+    Scans the current ladder snapshot for every build whose kit contains `skill`
+    (e.g. "Twister"), then separates the elements those builds SHARE — the core,
+    the concrete foundation to build from — from the situational variations — the
+    tech, which depends on the direction an individual takes the build.
+
+    Returns: cohort size, ascendancy spread, core/tech active skills, core/tech
+    key passives, an inferred scaling profile (attack vs spell, damage elements,
+    whether crit is core), and prioritised GEAR STAT targets derived from what the
+    build actually scales (e.g. attack speed, added cold damage, projectile damage)
+    rather than from any one build's exact items.
+
+    support_breakdown: the core/tech SUPPORT gems for the target skill and each
+    core skill. The ladder list doesn't carry support→skill linkage, so this part
+    fetches the actual builds — up to `support_builds` of the cohort (cached). Set
+    support_builds=0 to skip it for a faster, list-only answer.
+
+    core_threshold (0-1) is the fraction of the cohort an element must hit to count
+    as core; the band below it down to ~0.2 is tech. No build needs to be loaded.
+    """
+    if _gems is None:
+        return {"error": "gem database not loaded; cannot classify skills or infer gear."}
+    rows = poeninja.list_builds_with_kits(league=league)
+
+    build_groups: list[list[dict]] | None = None
+    build_passives: list[list[dict]] | None = None
+    if support_builds and support_builds > 0:
+        want = skill.strip().lower()
+        cohort = [r for r in rows if any(want == (s or "").lower() for s in (r.get("skills") or []))]
+        build_groups = []
+        build_passives = []
+        for r in cohort[: min(support_builds, 25)]:
+            try:
+                xml = decode_build_code(poeninja.fetch_pob_export(r["account"], r["character"], league=league))
+                b = parse_build_xml(xml, support_detector=_gem_db_support_detector)
+            except Exception:
+                continue  # skip builds that fail to fetch/parse; cohort is large enough
+            build_groups.append([
+                {"active_skill": g.active_skill,
+                 "supports": [gm.name for gm in g.gems if gm.is_support]}
+                for g in b.socket_groups
+            ])
+            nodes: list[dict] = []
+            if _tree is not None:
+                for nd in _tree.resolve_ids(b.allocated_node_ids, b.class_name or None, b.ascendancy or None):
+                    if nd.is_keystone or nd.is_notable:
+                        nodes.append({"name": nd.name,
+                                      "type": "keystone" if nd.is_keystone else "notable",
+                                      "id": nd.id})
+            build_passives.append(nodes)
+
+    return archetype.analyze(
+        skill, rows, _gems.get,
+        core_threshold=core_threshold,
+        build_groups=build_groups, build_passives=build_passives,
+    )
+
+
+@mcp.tool()
+def analyze_class_tree(
+    class_name: str,
+    league: str | None = None,
+    core_threshold: float = 0.6,
+    scan_limit: int = 80,
+    max_builds: int = 15,
+) -> dict:
+    """
+    Find the CORE vs TECH passive tree nodes for a character class (e.g. "Huntress").
+
+    Scans the current ladder, keeps builds of the given base class, resolves each
+    one's allocated passive tree, and separates the notables/keystones the class's
+    builds SHARE — the core tree skeleton — from the situational minority — the tech.
+
+    The ladder lists ascendancy, not base class, so this reads each build's actual
+    class by fetching it. To bound cost it scans at most `scan_limit` ladder rows and
+    stops once `max_builds` of the class are collected (results are cached, so repeat
+    calls are fast). Returns: cohort size, ascendancy spread, and core/tech tree nodes.
+
+    core_threshold (0-1) is the fraction of the cohort a node must hit to count as
+    core; the band down to ~0.2 is tech. No build needs to be loaded.
+    """
+    want = class_name.strip().lower()
+    rows = poeninja.list_builds_with_kits(league=league)
+
+    builds: list[dict] = []
+    for r in rows[: min(scan_limit, 100)]:
+        if len(builds) >= max_builds:
+            break
+        try:
+            xml = decode_build_code(poeninja.fetch_pob_export(r["account"], r["character"], league=league))
+            b = parse_build_xml(xml, support_detector=_gem_db_support_detector)
+        except Exception:
+            continue
+        if (b.class_name or "").lower() != want:
+            continue
+        nodes: list[dict] = []
+        if _tree is not None:
+            for nd in _tree.resolve_ids(b.allocated_node_ids, b.class_name or None, b.ascendancy or None):
+                if nd.is_keystone or nd.is_notable:
+                    nodes.append({"name": nd.name,
+                                  "type": "keystone" if nd.is_keystone else "notable",
+                                  "id": nd.id})
+        builds.append({"ascendancy": b.ascendancy, "nodes": nodes})
+
+    return archetype.analyze_class_tree(class_name, builds, core_threshold=core_threshold)
 
 
 @mcp.tool()

@@ -171,20 +171,20 @@ def _decode_dictionary(raw: bytes) -> dict[str, list[str]]:
     return cats
 
 
-def list_top_builds(league: str | None = None, limit: int = 20) -> list[dict]:
-    """Top builds for a league: rank, character, account, class, level, life, EHP, DPS."""
-    sv = _resolve_snapshot(league)
-    raw = _get_bytes(f"/poe2/api/builds/{sv['version']}/search", params={"overview": sv["snapshotName"]})
+def _parse_search(raw: bytes) -> tuple[dict[str, list[bytes]], dict[str, str]]:
+    """Decode the columnar search payload.
 
+    Returns (result_cols, dim_hashes): result_cols maps a result-column name to
+    its list of per-build value-entry bytes; dim_hashes maps a filter-dimension
+    name to the hash of the string dictionary its indices reference.
+    """
     top = pb.read_fields(raw)
     inner = next((v for f, wt, v in top if f == 1 and wt == pb.WIRETYPE_LEN), None)
+    result_cols: dict[str, list[bytes]] = {}
+    dim_hashes: dict[str, str] = {}
     if inner is None:
-        return []
-    fields = pb.read_fields(inner)
-
-    result_cols: dict[str, list[bytes]] = {}   # column name -> value-entry bytes
-    dim_hashes: dict[str, str] = {}            # dimension name -> dictionary hash
-    for f, wt, v in fields:
+        return result_cols, dim_hashes
+    for f, wt, v in pb.read_fields(inner):
         if wt != pb.WIRETYPE_LEN:
             continue
         sub = pb.read_fields(v)
@@ -197,6 +197,43 @@ def list_top_builds(league: str | None = None, limit: int = 20) -> list[dict]:
             h = _find_hash(sub)
             if h:
                 dim_hashes[name] = h
+    return result_cols, dim_hashes
+
+
+def _dim_values(dim_hashes: dict[str, str], dim: str) -> list[str]:
+    """Fetch and decode a dimension's string dictionary into an index-ordered list."""
+    h = dim_hashes.get(dim)
+    if not h:
+        return []
+    cats = _decode_dictionary(_get_bytes(f"/poe2/api/builds/dictionary/{h}"))
+    return cats.get(dim) or (next(iter(cats.values()), []) if cats else [])
+
+
+def _index_list(entry: bytes) -> list[int]:
+    """Decode a list-valued result entry (skills, keypassives).
+
+    Such an entry wraps a nested message whose length-delimited field carries the
+    dictionary indices packed as varints (so values past 127 round-trip, unlike
+    a raw-byte read).
+    """
+    out: list[int] = []
+    for _f, wt, v in pb.read_fields(entry):
+        if wt == pb.WIRETYPE_LEN and isinstance(v, (bytes, bytearray)):
+            pos = 0
+            while pos < len(v):
+                val, pos = pb._read_varint(v, pos)
+                out.append(val)
+    return out
+
+
+def list_top_builds(league: str | None = None, limit: int = 20) -> list[dict]:
+    """Top builds for a league: rank, character, account, class, level, life, EHP, DPS."""
+    sv = _resolve_snapshot(league)
+    raw = _get_bytes(f"/poe2/api/builds/{sv['version']}/search", params={"overview": sv["snapshotName"]})
+
+    result_cols, dim_hashes = _parse_search(raw)
+    if not result_cols:
+        return []
 
     def col(name: str) -> list:
         return [_entry_scalar(e) for e in result_cols.get(name, [])]
@@ -232,6 +269,62 @@ def list_top_builds(league: str | None = None, limit: int = 20) -> list[dict]:
             "energy_shield": es[i] if i < len(es) else None,
             "ehp": ehps[i] if i < len(ehps) else None,
             "dps": dpses[i] if i < len(dpses) else None,
+        })
+    return rows[:limit]
+
+
+def list_builds_with_kits(league: str | None = None, limit: int = 100) -> list[dict]:
+    """Top builds with each build's active-skill kit and key passives decoded.
+
+    Like list_top_builds, but each row also carries `skills` and `keypassives`
+    (lists of names) resolved through their per-dimension dictionaries. This is
+    the cohort data archetype analysis runs on — no per-build PoB fetch needed.
+    """
+    sv = _resolve_snapshot(league)
+    raw = _get_bytes(f"/poe2/api/builds/{sv['version']}/search", params={"overview": sv["snapshotName"]})
+
+    cols, dim_hashes = _parse_search(raw)
+    if not cols:
+        return []
+
+    def col(name: str) -> list:
+        return [_entry_scalar(e) for e in cols.get(name, [])]
+
+    names = col("name")
+    accounts = col("account")
+    levels = col("level")
+    lifes = col("life")
+    es = col("energyshield")
+    ehps = col("ehp")
+    dpses = col("dps")
+    class_idx = col("class")
+
+    class_vals = _dim_values(dim_hashes, "class")
+    gem_vals = _dim_values(dim_hashes, "gem")
+    kp_vals = _dim_values(dim_hashes, "keypassive")
+    skills_entries = cols.get("skills", [])
+    kp_entries = cols.get("keypassives", [])
+
+    def resolve(entry: bytes, values: list[str]) -> list[str]:
+        return [values[i] for i in _index_list(entry) if 0 <= i < len(values)]
+
+    rows: list[dict] = []
+    for i in range(len(names)):
+        # class index uses scalar encoding where a leading 0 is omitted -> None.
+        ci = class_idx[i] if i < len(class_idx) else None
+        ci = 0 if ci is None else int(ci)
+        rows.append({
+            "rank": i + 1,
+            "character": names[i],
+            "account": accounts[i] if i < len(accounts) else None,
+            "class": class_vals[ci] if 0 <= ci < len(class_vals) else None,
+            "level": levels[i] if i < len(levels) else None,
+            "life": lifes[i] if i < len(lifes) else None,
+            "energy_shield": es[i] if i < len(es) else None,
+            "ehp": ehps[i] if i < len(ehps) else None,
+            "dps": dpses[i] if i < len(dpses) else None,
+            "skills": resolve(skills_entries[i], gem_vals) if i < len(skills_entries) else [],
+            "keypassives": resolve(kp_entries[i], kp_vals) if i < len(kp_entries) else [],
         })
     return rows[:limit]
 

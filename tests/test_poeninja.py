@@ -73,6 +73,14 @@ def test_list_top_builds_respects_limit():
     assert len(poeninja.list_top_builds(limit=3)) == 3
 
 
+def test_index_list_decodes_packed_varints():
+    # A list entry wraps a nested message (field 3, LEN) of packed varint indices.
+    # 200 needs a 2-byte varint, proving values past a single byte round-trip.
+    payload = bytes([0x00, 0x05, 0xC8, 0x01])          # varints: 0, 5, 200
+    entry = bytes([0x1A, len(payload)]) + payload      # field 3, wiretype LEN
+    assert poeninja._index_list(entry) == [0, 5, 200]
+
+
 def test_fetch_pob_export_returns_decodable_code():
     code = poeninja.fetch_pob_export("methanman-2640", "drubringer")
     assert len(code) > 1000
