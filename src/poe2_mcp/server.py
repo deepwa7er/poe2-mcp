@@ -58,6 +58,7 @@ from .community import archetype, poeninja
 from .crafting import (
     load_default_craft_data,
     advise as _advise_craft,
+    analyze_build_items as _analyze_build_items,
     acquisition_model as _acquisition_model,
 )
 from .mechanics import explain as _explain_mechanic
@@ -79,53 +80,31 @@ from .vendor_regex import (
 # copy, keep the other in sync.
 _BUILD_REVIEW_GUIDANCE = """\
 poe2-mcp inspects a Path of Building 2 character. When you REVIEW or critique a
-build with these tools, run the review in this ORDER, then follow the PRINCIPLES.
-They encode how PoE2 actually works and head off common PoE1-brained mistakes.
+build, FOLLOW THE PRINCIPLES BELOW FIRST — they encode how PoE2 actually works and
+head off common PoE1-brained mistakes — then produce the sections in REVIEW ORDER.
+(Principles come first on purpose: if this text is ever truncated, the rules that
+keep the review correct must survive; the section ordering is the expendable part.)
 
-REVIEW STRUCTURE — produce the sections in this order:
-
-  0. Identify the build FIRST. Infer the archetype and win condition from the
-     kit, passive tree, ascendancy and items (e.g. "ignite fire caster", "minion
-     summoner", "crit lightning attacks", "ES-stacking spellcaster"). If it is
-     genuinely ambiguous which build the user is running — several damage axes
-     half-invested with no clear main, or a tree that points one way while the
-     skills point another — ASK a clarifying question before analysing rather
-     than guessing.
-
-  1. SYNERGY ANALYSIS — the most important section, lead with it. Map how the
-     pieces interact across ALL of: passive tree notables, ascendancy nodes,
-     active skill gems, support gems, and spirit-reserved skills ("spirit gems":
-     heralds, auras, persistent buffs, minions, meta/trigger gems like Cast on
-     Elemental Ailment — see get_spirit_reservation). State plainly which pieces
-     SYNERGISE (push the same damage type / ailment / scaling axis / defensive
-     layer) and which DON'T — a tree invested in an axis the skills and supports
-     don't use (e.g. ignite/Bringer-of-Flame nodes while the skills scale hit and
-     ignite DPS is ~0) is dead investment and is the single highest-value finding.
-
-  2. RECOMMENDATIONS for pieces the build does NOT currently have but that would
-     synergise with what it does — across passives, skill gems, support gems and
-     spirit gems. Make them concrete swaps wherever possible: "remove X, take Y
-     instead." Use path_to_node / get_reachable_nodes / search_tree for tree
-     moves, discover_skills / recommend_supports for gems. Respect the PRINCIPLES
-     below (supports are craftable copies; gear is packages).
-
-  3. Then DEFENSES and DPS-per-skill (see principle 4), and any cleanup
-     (empty sockets, duplicate/leftover gems, wasted spirit).
-
-  4. LAST, and only last: off-build / suboptimal GEAR affixes. You MAY note they
-     exist (e.g. "this amulet's crit roll does little for a non-crit build"), but
-     only here at the end, framed as criteria for the next item — never woven
-     through earlier sections, never as "remove modifier X" (see principle 3).
+NEVER-DO list (the mistakes reviewers make most — violating these is worse than a
+shallow review): (a) tell the user to drop/collapse/consolidate to ONE skill, or
+call a multi-skill setup "sprawl"/"diffuse"/"unfocused"; (b) advise moving or
+reallocating a support gem between skills, or say supports are "spread thin"; (c)
+advise removing/dropping a single modifier off a rare item; (d) reduce the build to
+one DPS number; (e) recite a game mechanic from PoE1 memory instead of checking.
 
 PRINCIPLES:
 
-1. A build is a KIT of skills, not one skill. Running several active damage
-   skills at once is normal and intended: a character swaps between a clear
-   skill (many weak enemies) and a single-target/boss skill, plus utility
-   (walls, curses, minions, movement) that combos with them — e.g. Firebolt
-   cast through Flame Wall for added fire. Never call a multi-skill setup
-   "sprawl", never tell the user to collapse the kit down to one skill, and
-   judge each skill in its role rather than against the others.
+1. A build is a KIT of skills, not one skill. Running several active damage skills
+   at once is NORMAL, INTENDED, and good — there is no single-6-link opportunity
+   cost like PoE1. A character swaps between a clear skill (many weak enemies) and
+   a single-target/boss skill, plus utility (walls, curses, minions, movement) that
+   combos with them — e.g. Firebolt cast through Flame Wall for added fire. Upgrading
+   MULTIPLE skills is a valid goal with no inherent downside. Never call a multi-skill
+   setup "sprawl" or "diffuse", never tell the user to collapse/consolidate the kit
+   down to one skill, never frame having more skills as a problem to fix, and judge
+   each skill in its ROLE rather than against the others. If you catch yourself about
+   to recommend "pick one main skill" — stop; that is the #1 mistake this server exists
+   to prevent. Help them make each skill better instead.
 
 2. Support gems are NOT a scarce shared pool. In PoE2 you can craft unlimited
    copies of any support gem, so every skill in the kit can be fully and
@@ -158,6 +137,43 @@ PRINCIPLES:
    you reason about a game SYSTEM rather than the loaded build's data, call
    explain_mechanic first (no argument for the index, or a topic like 'ailments',
    'defenses', 'spirit'). Don't recite mechanics from memory.
+
+REVIEW STRUCTURE — produce the sections in this order:
+
+  0. Identify the build FIRST. Infer the archetype and win condition from the
+     kit, passive tree, ascendancy and items (e.g. "ignite fire caster", "minion
+     summoner", "crit lightning attacks", "ES-stacking spellcaster"). A kit with
+     several developed damage skills is normal — identify each one's role (clear /
+     single-target / utility), do NOT treat multiple skills as ambiguity to resolve
+     by picking one. Only ASK a clarifying question when the data is genuinely
+     contradictory — a tree that scales one axis while every skill and support
+     scales another — not merely because more than one skill is present.
+
+  1. SYNERGY ANALYSIS — the most important section, lead with it. Map how the
+     pieces interact across ALL of: passive tree notables, ascendancy nodes,
+     active skill gems, support gems, and spirit-reserved skills ("spirit gems":
+     heralds, auras, persistent buffs, minions, meta/trigger gems like Cast on
+     Elemental Ailment — see get_spirit_reservation). State plainly which pieces
+     SYNERGISE (push the same damage type / ailment / scaling axis / defensive
+     layer) and which DON'T — a tree invested in an axis the skills and supports
+     don't use (e.g. ignite/Bringer-of-Flame nodes while the skills scale hit and
+     ignite DPS is ~0) is dead investment and is the single highest-value finding.
+
+  2. RECOMMENDATIONS for pieces the build does NOT currently have but that would
+     synergise with what it does — across passives, skill gems, support gems and
+     spirit gems. Make them concrete additions/swaps wherever possible: "add Y",
+     "take Y instead of X". Improving several skills at once is a fine recommendation.
+     Use path_to_node / get_reachable_nodes / search_tree for tree moves,
+     discover_skills / recommend_supports for gems. Respect the PRINCIPLES above
+     (supports are craftable copies; gear is packages).
+
+  3. Then DEFENSES and DPS-per-skill (see principle 4), and any cleanup
+     (empty sockets, duplicate/leftover gems, wasted spirit).
+
+  4. LAST, and only last: off-build / suboptimal GEAR affixes. You MAY note they
+     exist (e.g. "this amulet's crit roll does little for a non-crit build"), but
+     only here at the end, framed as criteria for the next item — never woven
+     through earlier sections, never as "remove modifier X" (see principle 3).
 """
 
 mcp = FastMCP("poe2-mcp", instructions=_BUILD_REVIEW_GUIDANCE)
@@ -1344,6 +1360,52 @@ def craft_advisor(target: str, slot: str | None = None, base: str | None = None)
         item = Item(slot="", rarity="Rare", name=base, base_type=base, item_level=100)
         return _advise_craft(item, target, _craft)
     return {"error": "Specify either slot (an item on the loaded build) or base (a base type name)."}
+
+
+@mcp.tool()
+def analyze_item_fit(slot: str | None = None, priorities: list[str] | None = None) -> dict:
+    """
+    Analyze how well the loaded build's equipped items fit the build.
+
+    For every equipped item (or one `slot`), this reports two things per mod:
+      1. TIER & ROLL QUALITY (objective): which tier the mod rolled (T1 = best), the
+         best tier the item's level could already roll, and where the value sits in
+         its tier's range (roll_pct). Mods that can't be mapped to the craftable pool
+         (unique/essence-only, hybrid, ambiguous) are flagged unmatched, not guessed.
+      2. RELEVANCE TO THIS BUILD (opinionated): each mod is bucketed as
+         priority (fills an uncapped-resistance hole), fit (scales this build's
+         damage, or is its defensive base / caster mana), generic (universally useful
+         — life, capped resists, attributes, movement), or off_build (scaled to a
+         dimension this build doesn't use). The build profile is auto-derived: damage
+         types/delivery from the active skills, life-vs-energy-shield and resistance
+         gaps from the computed stats. It is returned so you can see the basis.
+
+    HOW TO USE THE OUTPUT (obey these — they're the point of the tool):
+      - Items are PACKAGES. You acquire a whole rare and CANNOT remove or cherry-pick
+        a single mod off it. NEVER advise "drop/remove mod X." An off_build affix is
+        NORMAL, not a defect — especially while levelling.
+      - Each item carries `next_item_criteria`: the weak ON-BUILD rolls (low tier vs
+        what the ilvl allows, or a poor roll). Frame these as what to look for in the
+        NEXT item that fills the slot, weighted by how realistic that upgrade is at the
+        character's level — not as edits to the current item.
+      - Don't reduce an item (or the build) to one number; there is intentionally no
+        single fit score. Read relevance + tiers + open slots together.
+      - This is gear fit only. In a full build review it slots in alongside (not in
+        place of) skills, defences and synergy — see the server review order.
+
+    Args:
+      slot       — optional, restrict to one slot (e.g. "Helmet", "Ring 1"); substring
+                   match. Omit to analyze the whole loadout.
+      priorities — optional stat keywords (e.g. ["chaos resistance", "cast speed"]) to
+                   force-count as on-build, augmenting the auto-derived profile.
+
+    Requires a loaded build and the crafting data.
+    """
+    if _craft is None:
+        return {"error": "Crafting data not loaded. Generate data/poe2_crafting.json via "
+                         "scripts/build_craft_data.py, or set CRAFT_DATA_PATH."}
+    build = _require_build()
+    return _analyze_build_items(build, _craft, _gems, priorities=priorities, slot=slot)
 
 
 @mcp.tool()

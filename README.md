@@ -58,6 +58,7 @@ claude mcp add poe2 -- uv --directory /path/to/poe2-mcp run poe2-mcp
 | `analyze_defenses` | Defensive sanity checks — uncapped/negative resistances, health pool |
 | `list_mods_for_base` | The affix pool that can roll on a base — prefix/suffix, tiers, item level, spawn weight |
 | `craft_advisor` | Build-aware advice for adding a stat to an item — open slots, tiers, risk-rated methods |
+| `analyze_item_fit` | How well equipped items fit the build — per-mod tier & roll quality, relevance, next-item criteria |
 | `explain_mechanic` | Durable model of a PoE2 game system (ailments, defenses, spirit, gems, …) — corrects PoE1 assumptions |
 | `generate_vendor_regex` | Build-aware vendor-search regex for one slot, packed under a 50-char budget |
 | `get_meta_overview` | Current build meta (ascendancy popularity) for a league, from poe.ninja |
@@ -141,7 +142,17 @@ the open-slot question is the whole point.
 ```
 list_mods_for_base("Sapphire Ring", keyword="cold resistance")   → the cold-res tiers a ring can roll
 craft_advisor(target="cold resistance", slot="Gloves")           → can I add it to my gloves, and how?
+analyze_item_fit()                                               → score every equipped item against the build
 ```
+
+`analyze_item_fit` reads the same affix pool the other crafting tools use, but in the other
+direction: it takes each item's *rolled* mods and places them back on their tier ladders —
+which tier (T1 = best), how good the roll is within that tier, and the best tier the item's
+level could already hold — then judges each mod's relevance to the build (its damage types
+and delivery come from the active skills; life-vs-energy-shield and resistance gaps from the
+computed stats). Weak *on-build* rolls become `next_item_criteria` for the slot. It respects
+the package rule: an off-build affix is normal, never "remove mod X", and there is no single
+fit score.
 
 `craft_advisor` ranks methods by risk (rune-in-socket, Exalt-to-open-slot with an approximate
 hit chance, essence/omen, remove-and-add, replace) and is honest about its limits — slot counts

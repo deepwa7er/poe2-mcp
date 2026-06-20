@@ -40,6 +40,43 @@ MAX_AFFIXES = {"rare": 3, "magic": 1, "normal": 0}
 # A parenthesised range "(6-10)" / "(-25)" or a bare number "38" / "1.5".
 _NUM = re.compile(r"\(-?[0-9.]+(?:-[0-9.]+)?\)|-?\d+(?:\.\d+)?")
 
+# A signed decimal, optionally followed by "-<signed decimal>" (a range). Used to
+# split a single _NUM token into its (lo, hi) bounds.
+_RANGE = re.compile(r"^(-?\d+(?:\.\d+)?)(?:-(-?\d+(?:\.\d+)?))?$")
+
+
+def _parse_range(token: str) -> tuple[float, float] | None:
+    """Parse one _NUM token into (lo, hi). A bare number becomes (n, n); a range
+    "(150-174)" becomes (150.0, 174.0). Returns None if it doesn't parse."""
+    m = _RANGE.match(token.strip().strip("()"))
+    if not m:
+        return None
+    lo = float(m.group(1))
+    hi = float(m.group(2)) if m.group(2) is not None else lo
+    return (lo, hi)
+
+
+def _template_ranges(text: str) -> list[tuple[float, float]]:
+    """The numeric bounds of every value slot in a mod template, in order."""
+    out = []
+    for mt in _NUM.finditer(text):
+        rng = _parse_range(mt.group(0))
+        if rng is not None:
+            out.append(rng)
+    return out
+
+
+def _rolled_values(line: str) -> list[float]:
+    """The concrete numbers in a rolled mod line, in order. A rolled line carries
+    plain numbers (no parenthesised ranges), so every token is a single value."""
+    out = []
+    for mt in _NUM.finditer(line):
+        try:
+            out.append(float(mt.group(0).strip("()")))
+        except ValueError:
+            continue
+    return out
+
 
 def _pattern_for(text: str) -> str:
     """Build a regex string that matches a rolled instance of a mod's template.
@@ -73,6 +110,14 @@ class CraftData:
         # rune_options returns concrete granted lines; absent, it returns [].
         self._runes = runes
         self._build_classifier()
+        # type -> its tiers (every mod sharing that mod type), best tier last.
+        # A "type" is one stat ladder (e.g. IncreasedLife); the trailing numeral on
+        # the id is the tier. Higher lvl = higher tier = better roll values.
+        self._by_type: dict[str, list[dict]] = {}
+        for m in self.mods:
+            self._by_type.setdefault(m["type"], []).append(m)
+        for tiers in self._by_type.values():
+            tiers.sort(key=lambda m: m["lvl"])
 
     def _build_classifier(self) -> None:
         # Dedupe by template pattern; remember which generation_type(s) and mod
@@ -178,6 +223,96 @@ class CraftData:
             if pat.match(text):
                 return gen, typ
         return None, None
+
+    # -- tier matching ------------------------------------------------------
+
+    def match_rolled_line(
+        self, line: str, base_tags: set[str] | None = None, ilvl: int | None = None
+    ) -> dict | None:
+        """Place a rolled mod line on its tier ladder.
+
+        Classifies the line to a mod type, then finds which tier it rolled (the tier
+        whose value range contains the rolled number) and how good that roll is.
+        Returns None when the line can't be classified (exotic/unique/essence-only
+        wording, or ambiguous) — the caller should report it as unmatched, not guess.
+
+        With `base_tags`, tiers that can't roll on that base (spawn weight 0) are
+        excluded, so the tier count reflects this item's real ladder. With `ilvl`,
+        the result flags whether a better tier is already reachable at this item
+        level or only at a higher one.
+
+        Result keys: type, gen, tier (1 = best), tier_count, tier_lvl (ilvl that
+        unlocks the rolled tier), roll_pct (0-100, position of the roll inside its
+        tier's range; None if the tier has no variable value), values, value_range,
+        best_tier_at_ilvl, next_better_tier_lvl (ilvl unlocking the next-better tier,
+        or None if already top), at_best_for_ilvl (no better tier reachable now).
+        """
+        gen, typ = self.classify_mod_line(line)
+        if typ is None:
+            return None
+        tiers = self._by_type.get(typ) or []
+        if base_tags is not None:
+            tiers = [t for t in tiers if self.weight_for_base(t, base_tags) > 0]
+        if not tiers:
+            return None
+
+        values = _rolled_values(line)
+        primary = values[0] if values else None
+
+        # Choose the tier whose primary range contains the rolled value; if the roll
+        # sits above every tier (quality/aug pushed it past the printed max) take the
+        # top tier, if below every tier take the bottom. Tiers are lvl-ascending.
+        chosen_idx = 0
+        if primary is not None:
+            chosen_idx = None
+            for i, t in enumerate(tiers):
+                rngs = _template_ranges(t["text"])
+                if not rngs:
+                    continue
+                lo, hi = rngs[0]
+                if lo <= primary <= hi:
+                    chosen_idx = i
+                    break
+            if chosen_idx is None:
+                # Above the top tier's max, or below the bottom tier's min.
+                top = _template_ranges(tiers[-1]["text"])
+                chosen_idx = len(tiers) - 1 if (top and primary >= top[0][1]) else 0
+        chosen = tiers[chosen_idx]
+
+        # roll_pct: average position of each variable value within its tier range.
+        pcts = []
+        for (lo, hi), v in zip(_template_ranges(chosen["text"]), values):
+            if hi != lo:
+                # Clamp: a roll can't legitimately sit outside its tier's printed
+                # range; out-of-range means quality adjusted the shown value or a
+                # local/global wording collision, not a real >100%/<0% roll.
+                pcts.append(min(1.0, max(0.0, (v - lo) / (hi - lo))))
+        roll_pct = round(100 * sum(pcts) / len(pcts), 1) if pcts else None
+
+        n = len(tiers)
+        tier_rank = n - chosen_idx  # 1 = best
+        best_at_ilvl_idx = None
+        if ilvl is not None:
+            reachable = [i for i, t in enumerate(tiers) if t["lvl"] <= ilvl]
+            if reachable:
+                best_at_ilvl_idx = max(reachable)
+        # The next-better tier above the rolled one (None if already top).
+        next_better = tiers[chosen_idx + 1] if chosen_idx + 1 < n else None
+
+        rng = _template_ranges(chosen["text"])
+        return {
+            "type": typ,
+            "gen": gen,
+            "tier": tier_rank,
+            "tier_count": n,
+            "tier_lvl": chosen["lvl"],
+            "roll_pct": roll_pct,
+            "values": values,
+            "value_range": rng[0] if rng else None,
+            "best_tier_at_ilvl": (n - best_at_ilvl_idx) if best_at_ilvl_idx is not None else None,
+            "at_best_for_ilvl": best_at_ilvl_idx is not None and best_at_ilvl_idx <= chosen_idx,
+            "next_better_tier_lvl": next_better["lvl"] if next_better else None,
+        }
 
     # -- runes --------------------------------------------------------------
 

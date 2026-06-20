@@ -1,0 +1,4 @@
+fastapi>=0.115
+uvicorn>=0.30
+# Chat bridge (optional — only needed for the /api/chat panel):
+anthropic[mcp]>=0.69
